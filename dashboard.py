@@ -15,16 +15,23 @@ dashboard.py
 หัวข้อ "การ Deploy ขึ้นใช้งานจริง")
 """
 
-from flask import Flask, render_template_string, redirect, url_for, flash
+import base64
+import hashlib
+import hmac
+import json
+import os
+from flask import Flask, render_template_string, redirect, url_for, flash, request, abort
 
 from db_setup import init_mock_db, get_connection, DB_PATH
 from fine_calculator import check_and_update_fines, mark_as_notified, DEFAULT_FINE_RATE_PER_DAY
 from line_notify import LineNotifier
-import os
 
 app = Flask(__name__)
 # อ่าน secret key จาก environment variable ก่อนเสมอ (สำคัญสำหรับ production)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-only-change-this-in-production")
+
+# อ่าน LINE Channel Secret สำหรับตรวจสอบความปลอดภัยของ Webhook
+LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "")
 
 PAGE_TEMPLATE = """
 <!DOCTYPE html>
@@ -110,7 +117,7 @@ PAGE_TEMPLATE = """
   </table>
 
   <p style="margin-top:1.5rem; color:#9ca3af; font-size:0.8rem;">
-    อัตราค่าปรับ: {{ rate }} บาท/วัน &middot; โหมดแจ้งเตือน: dry-run (จำลองการส่ง ยังไม่ผูก LINE token จริง)
+    อัตราค่าปรับ: {{ rate }} บาท/วัน &middot; โหมดแจ้งเตือน: dry-run / live (ขึ้นอยู่กับการตั้งค่า LINE Token)
   </p>
 </body>
 </html>
@@ -193,6 +200,48 @@ def run_check():
 
     flash(f"ตรวจสอบเสร็จสิ้น: พบรายการเลยกำหนด {len(overdue_list)} รายการ ส่งแจ้งเตือนสำเร็จ {sent} รายการ")
     return redirect(url_for("index"))
+
+
+# --- ส่วนที่เพิ่มเข้ามาใหม่: Webhook สำหรับรับ userId จาก LINE ---
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    signature = request.headers.get('X-Line-Signature', '')
+    body = request.get_data(as_text=True)
+
+    # ตรวจสอบลายเซ็น (Signature Verification) ถ้ามีการตั้งค่า Channel Secret ไว้
+    if LINE_CHANNEL_SECRET:
+        hash = hmac.new(LINE_CHANNEL_SECRET.encode('utf-8'),
+                        body.encode('utf-8'),
+                        hashlib.sha256).digest()
+        computed_signature = base64.b64encode(hash).decode('utf-8')
+
+        if not hmac.compare_digest(computed_signature, signature):
+            abort(400)
+
+    try:
+        data = json.loads(body)
+        events = data.get('events', [])
+
+        for event in events:
+            # ดึงข้อมูลเมื่อมีผู้ใช้งานกด Add Friend (follow event)
+            if event.get('type') == 'follow':
+                user_id = event.get('source', {}).get('userId')
+                if user_id:
+                    ensure_db()
+                    conn = get_connection()
+                    cursor = conn.cursor()
+                    # บันทึก userId ลงตาราง users (ป้องกันซ้ำด้วย INSERT OR IGNORE)
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO users (user_id) 
+                        VALUES (?)
+                    """, (user_id,))
+                    conn.commit()
+                    conn.close()
+                    print(f"Saved new user_id from LINE: {user_id}")
+    except Exception as e:
+        print(f"Webhook Error: {e}")
+
+    return 'OK', 200
 
 
 if __name__ == "__main__":
