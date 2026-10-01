@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>แดชบอร์ดเจ้าหน้าที่ | ยืมคืนกล้อง</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="/"><span class="brand-logo"></span>ยืมคืนกล้อง</a>
+  <nav class="nav">
+    <a href="/booking">จองอุปกรณ์</a>
+    <a class="active" href="/">แดชบอร์ดเจ้าหน้าที่</a>
+  </nav>
+</header>
+
+<main class="container">
+
+  <div class="toolbar">
+    <h1>รายการยืม-คืนอุปกรณ์</h1>
+
+    <!-- ปุ่มตรวจสอบค่าปรับ → POST /check -->
+    <form method="POST" action="/check">
+      <button type="submit" class="btn btn-amber">ตรวจสอบค่าปรับและแจ้งเตือน LINE</button>
+    </form>
+  </div>
+
+  <!-- Flash message จาก Backend -->
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="flash-area">
+      {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ '✅' if category == 'success' else '❌' }} {{ message }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  {% endwith %}
+
+  <!-- ถ้า Backend ยังไม่ส่ง records มา จะใช้ข้อมูลตัวอย่างแทน (ลบทิ้งได้เมื่อเชื่อมจริง) -->
+  {% set rows = records if records is defined else [
+    {'id': 1, 'user_id': '001', 'equipment_name': 'กล้อง', 'start_date': '1/10', 'end_date': '5/10', 'return_date': None, 'fine': 100, 'status': 'overdue'},
+    {'id': 2, 'user_id': '002', 'equipment_name': 'ขาตั้ง', 'start_date': '2/10', 'end_date': '6/10', 'return_date': '6/10', 'fine': 0, 'status': 'returned'},
+    {'id': 3, 'user_id': '003', 'equipment_name': 'กล้อง', 'start_date': '3/10', 'end_date': '8/10', 'return_date': None, 'fine': 0, 'status': 'borrowing'}
+  ] %}
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ผู้ยืม</th>
+          <th>อุปกรณ์</th>
+          <th>วันที่ยืม</th>
+          <th>กำหนดคืน</th>
+          <th>วันที่คืน</th>
+          <th class="num">ค่าปรับ</th>
+          <th>สถานะ</th>
+          <th>การทำงาน</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        {# แปลงค่า status จาก Backend เป็นสี/ข้อความ — แก้รายการได้ตามที่เพื่อนส่งมา #}
+        {% if r.status in ['returned', 'คืนแล้ว'] %}
+          {% set cls, label = 'returned', 'คืนแล้ว' %}
+        {% elif r.status in ['overdue', 'เลยกำหนด'] %}
+          {% set cls, label = 'overdue', 'เลยกำหนด' %}
+        {% else %}
+          {% set cls, label = 'borrowing', 'กำลังยืม' %}
+        {% endif %}
+        <tr>
+          <td>{{ r.user_id }}</td>
+          <td>{{ r.equipment_name }}</td>
+          <td>{{ r.start_date }}</td>
+          <td>{{ r.end_date }}</td>
+          <td>{{ r.return_date or '-' }}</td>
+          <td class="num {{ 'fine-due' if r.fine and r.fine > 0 }}">{{ r.fine or 0 }}</td>
+          <td><span class="badge {{ cls }}">{{ label }}</span></td>
+          <td>
+            {% if cls == 'returned' %}
+              -
+            {% else %}
+              <!-- ปุ่มรับคืน → /return/<record_id> -->
+              <a class="btn btn-sm" href="/return/{{ r.id }}">รับคืน</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td class="empty-row" colspan="8">ยังไม่มีรายการยืม-คืน</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</main>
+
+</body>
+</html>

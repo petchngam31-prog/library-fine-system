@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>จองอุปกรณ์ | ยืมคืนกล้อง</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="/booking"><span class="brand-logo"></span>ยืมคืนกล้อง</a>
+  <nav class="nav">
+    <a class="active" href="/booking">จองอุปกรณ์</a>
+    <a href="/">แดชบอร์ดเจ้าหน้าที่</a>
+  </nav>
+</header>
+
+<main class="container">
+
+  <!-- Flash message จาก Backend (flash("...", "success") หรือ "error") -->
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="flash-area">
+      {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ '✅' if category == 'success' else '❌' }} {{ message }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  {% endwith %}
+
+  <div class="steps">
+    <span class="step active" id="stepLabel1">1 เลือกอุปกรณ์</span><span class="sep"></span>
+    <span class="step" id="stepLabel2">2 เลือกวัน-เวลา</span><span class="sep"></span>
+    <span class="step" id="stepLabel3">3 ยืนยัน</span>
+  </div>
+
+  <!-- ถ้า Backend ยังไม่ส่ง equipments มา จะใช้ข้อมูลตัวอย่างด้านล่างแทน -->
+  {% set items = equipments if equipments is defined else [
+    {'id': 1, 'name': 'กล้อง Canon EOS R50', 'desc': 'Mirrorless Camera', 'category': 'camera', 'available': 10},
+    {'id': 2, 'name': 'กล้องภาพนิ่ง Nikon 3300', 'desc': 'กระเป๋า + สายชาร์จ + แท่นชาร์จ + เมมโมรี่การ์ด', 'category': 'camera', 'available': 16},
+    {'id': 3, 'name': 'ขาตั้งกล้อง Sony', 'desc': 'ยี่ห้อ Sony', 'category': 'tripod', 'available': 15},
+    {'id': 4, 'name': 'กล้องภาพนิ่ง Canon 700D', 'desc': 'กระเป๋า + สายชาร์จ + แท่นชาร์จ + เมมโมรี่การ์ด', 'category': 'camera', 'available': 30},
+    {'id': 5, 'name': 'กล้องดิจิตอลวีดีโอ Panasonic HC-V700', 'desc': 'กล้องดิจิตอลวีดีโอ (2012)', 'category': 'video', 'available': 4},
+    {'id': 6, 'name': 'ขาตั้งกล้อง Fancier', 'desc': 'ขาตั้งกล้อง หัวบอล', 'category': 'tripod', 'available': 10}
+  ] %}
+
+  <form id="bookForm" method="POST" action="/book">
+    <div class="layout">
+
+      <!-- ===== ฝั่งซ้าย ===== -->
+      <div>
+
+        <!-- STEP 1: เลือกอุปกรณ์ -->
+        <section id="step1">
+          <div class="chips" id="chips">
+            <button type="button" class="chip active" data-cat="all">ทั้งหมด · <span data-count="all"></span></button>
+            <button type="button" class="chip" data-cat="camera">กล้องถ่ายภาพ · <span data-count="camera"></span></button>
+            <button type="button" class="chip" data-cat="video">กล้องวิดีโอ · <span data-count="video"></span></button>
+            <button type="button" class="chip" data-cat="tripod">ขาตั้งกล้อง · <span data-count="tripod"></span></button>
+          </div>
+
+          <input class="search" type="search" id="search" placeholder="ค้นหากล้อง เช่น Canon, Nikon, Panasonic" aria-label="ค้นหากล้อง">
+
+          <div class="grid" id="grid">
+            {% for e in items %}
+            <label class="card" data-cat="{{ e.category }}" data-name="{{ e.name }}">
+              <!-- name="equipment_id" ตรงกับที่ Backend ต้องการ -->
+              <input type="checkbox" name="equipment_id" value="{{ e.id }}" {{ 'disabled' if e.available == 0 }}>
+              <div class="card-img">{{ {'camera': '📷', 'video': '🎥', 'tripod': '📐'}.get(e.category, '📦') }}</div>
+              <div class="card-body">
+                <h3 class="card-title">{{ e.name }}</h3>
+                <p class="card-desc">{{ e.desc }}</p>
+                {% if e.available > 0 %}
+                  <p class="stock">พร้อมให้ยืม {{ e.available }} ชิ้น</p>
+                  <span class="pick pick-off">+ เลือก</span>
+                  <span class="pick pick-on">เลือกแล้ว ✓</span>
+                {% else %}
+                  <p class="stock out">ไม่ว่าง</p>
+                {% endif %}
+              </div>
+            </label>
+            {% endfor %}
+          </div>
+        </section>
+
+        <!-- STEP 2: เลือกวัน-เวลา -->
+        <section id="step2" class="panel" hidden>
+          <h2>ช่วงเวลาที่ต้องการยืม</h2>
+          <div class="form-grid">
+            <div class="field full">
+              <label class="lbl" for="user_id">รหัสผู้ยืม</label>
+              <input type="text" id="user_id" name="user_id" placeholder="เช่น 6612345678" required>
+            </div>
+            <div class="field">
+              <label class="lbl" for="start_date">วันที่รับอุปกรณ์</label>
+              <input type="date" id="start_date" name="start_date" required>
+            </div>
+            <div class="field">
+              <label class="lbl" for="start_time">เวลารับ</label>
+              <input type="time" id="start_time" name="start_time" value="09:00">
+            </div>
+            <div class="field">
+              <label class="lbl" for="end_date">วันที่คืนอุปกรณ์</label>
+              <input type="date" id="end_date" name="end_date" required>
+            </div>
+            <div class="field">
+              <label class="lbl" for="end_time">เวลาคืน</label>
+              <input type="time" id="end_time" name="end_time" value="16:00">
+            </div>
+            <div class="field full">
+              <label class="lbl" for="purpose">วัตถุประสงค์การยืม</label>
+              <input type="text" id="purpose" name="purpose" placeholder="เช่น ถ่ายงานรายวิชา">
+            </div>
+            <p class="notice">กรุณาตรวจสอบสภาพอุปกรณ์และอุปกรณ์เสริมทุกชิ้นก่อนรับ และส่งคืนตรงเวลา</p>
+          </div>
+        </section>
+      </div>
+
+      <!-- ===== ฝั่งขวา: สรุปรายการ ===== -->
+      <aside class="panel summary">
+        <h2 id="summaryTitle">รายการที่เลือก (0)</h2>
+        <ul class="summary-list" id="summaryList"></ul>
+        <p class="meta">ผู้ให้บริการ: การเรียนการสอน ชั้น 2<br>ผู้ดูแล: อุสมาน ตาเละ</p>
+
+        <button type="button" class="btn btn-amber btn-block" id="nextBtn">เลือกวัน-เวลา →</button>
+        <button type="submit" class="btn btn-block" id="submitBtn" hidden>ยืนยันการขอยืม</button>
+        <button type="button" class="btn btn-outline btn-block" id="backBtn" hidden>← กลับไปเลือกอุปกรณ์</button>
+      </aside>
+
+    </div>
+  </form>
+</main>
+
+<script>
+  const $ = (s) => document.querySelector(s);
+  const cards = [...document.querySelectorAll('.card')];
+  let activeCat = 'all';
+
+  // --- นับจำนวนในแต่ละหมวด ---
+  document.querySelectorAll('[data-count]').forEach((el) => {
+    const c = el.dataset.count;
+    el.textContent = c === 'all' ? cards.length : cards.filter((k) => k.dataset.cat === c).length;
+  });
+
+  // --- กรองหมวด + ค้นหา ---
+  function applyFilter() {
+    const q = $('#search').value.trim().toLowerCase();
+    cards.forEach((card) => {
+      const okCat = activeCat === 'all' || card.dataset.cat === activeCat;
+      const okName = card.dataset.name.toLowerCase().includes(q);
+      card.hidden = !(okCat && okName);
+    });
+  }
+  document.querySelectorAll('.chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      document.querySelectorAll('.chip').forEach((c) => c.classList.remove('active'));
+      chip.classList.add('active');
+      activeCat = chip.dataset.cat;
+      applyFilter();
+    });
+  });
+  $('#search').addEventListener('input', applyFilter);
+
+  // --- สรุปรายการที่เลือก ---
+  const selected = () => cards.filter((c) => c.querySelector('input').checked);
+  function renderSummary() {
+    const list = selected();
+    $('#summaryTitle').textContent = `รายการที่เลือก (${list.length})`;
+    $('#summaryList').innerHTML = list.length
+      ? list.map((c) => `<li><span>${c.dataset.name}</span><span>× 1</span></li>`).join('')
+      : '<li class="empty">ยังไม่ได้เลือกอุปกรณ์</li>';
+  }
+  cards.forEach((c) => c.querySelector('input').addEventListener('change', renderSummary));
+  renderSummary();
+
+  // --- สลับ Step ---
+  function goStep(n) {
+    $('#step1').hidden = n !== 1;
+    $('#step2').hidden = n !== 2;
+    $('#nextBtn').hidden = n !== 1;
+    $('#submitBtn').hidden = n !== 2;
+    $('#backBtn').hidden = n !== 2;
+    $('#stepLabel1').classList.toggle('active', n === 1);
+    $('#stepLabel2').classList.toggle('active', n === 2);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  $('#nextBtn').addEventListener('click', () => {
+    if (!selected().length) { alert('กรุณาเลือกอุปกรณ์อย่างน้อย 1 รายการ'); return; }
+    goStep(2);
+  });
+  $('#backBtn').addEventListener('click', () => goStep(1));
+
+  // --- วันที่: เลือกย้อนหลังไม่ได้ / วันคืนต้องไม่ก่อนวันรับ ---
+  const today = new Date().toISOString().split('T')[0];
+  $('#start_date').min = today;
+  $('#end_date').min = today;
+  $('#start_date').addEventListener('change', (e) => {
+    $('#end_date').min = e.target.value || today;
+  });
+</script>
+</body>
+</html>
