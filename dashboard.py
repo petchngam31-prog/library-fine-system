@@ -3,16 +3,7 @@ dashboard.py
 ============
 เว็บแดชบอร์ดอย่างง่ายสำหรับ "เจ้าหน้าที่" ใช้ดูรายการยืม-คืนอุปกรณ์
 รายการที่เลยกำหนด ค่าปรับ และสามารถกดปุ่มเพื่อสั่งให้ระบบตรวจสอบ +
-ส่งแจ้งเตือน LINE ได้จากหน้าเว็บโดยตรง (ไม่ต้องพิมพ์คำสั่งเอง)
-
-วิธีรัน:
-    pip install flask
-    python dashboard.py
-แล้วเปิดเบราว์เซอร์ไปที่ http://127.0.0.1:5000
-
-หมายเหตุ: นี่คือเว็บสำหรับรันทดสอบในเครื่อง (development server) เท่านั้น
-ถ้าจะให้คนอื่นเข้าจากที่อื่นได้ ต้อง deploy ขึ้นเซิร์ฟเวอร์จริง (ดู README
-หัวข้อ "การ Deploy ขึ้นใช้งานจริง")
+ส่งแจ้งเตือน LINE ได้จากหน้าเว็บโดยตรง พร้อมระบบจองและคืนอุปกรณ์
 """
 
 import base64
@@ -20,17 +11,18 @@ import hashlib
 import hmac
 import json
 import os
+from datetime import date, datetime
+import sqlite3
 from flask import Flask, render_template_string, redirect, url_for, flash, request, abort
 
 from db_setup import init_mock_db, get_connection, DB_PATH
-from fine_calculator import check_and_update_fines, mark_as_notified, DEFAULT_FINE_RATE_PER_DAY
+from fine_calculator import check_and_update_fines, mark_as_notified, DEFAULT_FINE_RATE_PER_DAY, calculate_fine
 from line_notify import LineNotifier
+from eligibility_checker import check_eligibility
 
 app = Flask(__name__)
-# อ่าน secret key จาก environment variable ก่อนเสมอ (สำคัญสำหรับ production)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-only-change-this-in-production")
 
-# อ่าน LINE Channel Secret สำหรับตรวจสอบความปลอดภัยของ Webhook
 LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "")
 
 PAGE_TEMPLATE = """
@@ -40,92 +32,15 @@ PAGE_TEMPLATE = """
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>แดชบอร์ดระบบยืม-คืนอุปกรณ์</title>
-<style>
-  :root { color-scheme: light; }
-  body { font-family: "Segoe UI", "Sarabun", sans-serif; background:#f4f5f7; margin:0; padding:2rem; color:#1f2430; }
-  h1 { font-size:1.5rem; margin-bottom:0.25rem; }
-  .subtitle { color:#6b7280; margin-bottom:1.5rem; }
-  .cards { display:flex; gap:1rem; margin-bottom:1.5rem; flex-wrap:wrap; }
-  .card { background:#fff; border-radius:10px; padding:1rem 1.5rem; box-shadow:0 1px 3px rgba(0,0,0,.08); min-width:160px; }
-  .card .num { font-size:1.6rem; font-weight:700; }
-  .card .label { color:#6b7280; font-size:0.85rem; }
-  table { width:100%; border-collapse:collapse; background:#fff; border-radius:10px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,.08); }
-  th, td { padding:0.7rem 1rem; text-align:left; border-bottom:1px solid #eee; font-size:0.92rem; }
-  th { background:#eef1f6; color:#374151; }
-  tr.overdue { background:#fff6f6; }
-  .badge { display:inline-block; padding:0.15rem 0.6rem; border-radius:999px; font-size:0.78rem; font-weight:600; }
-  .badge.overdue { background:#fde2e2; color:#b42318; }
-  .badge.ok { background:#e3f7e7; color:#15803d; }
-  .badge.notified { background:#e0ecff; color:#1d4ed8; margin-left:0.3rem; }
-  button, .btn { background:#2563eb; color:#fff; border:none; padding:0.6rem 1.1rem; border-radius:8px; cursor:pointer; font-size:0.9rem; text-decoration:none; display:inline-block; }
-  button:hover, .btn:hover { background:#1d4ed8; }
-  .flash { background:#e0ecff; color:#1d4ed8; padding:0.7rem 1rem; border-radius:8px; margin-bottom:1rem; }
-  .actions { margin-bottom:1.5rem; }
-</style>
 </head>
 <body>
-  <h1>📋 แดชบอร์ดระบบยืม-คืนอุปกรณ์</h1>
-  <p class="subtitle">คณะวิทยาการสื่อสาร &mdash; โมดูลแจ้งเตือนและติดตามการคืนอุปกรณ์ (ข้อมูลจำลอง)</p>
-
-  {% with messages = get_flashed_messages() %}
-    {% if messages %}
-      {% for m in messages %}<div class="flash">{{ m }}</div>{% endfor %}
-    {% endif %}
-  {% endwith %}
-
-  <div class="cards">
-    <div class="card"><div class="num">{{ overdue_count }}</div><div class="label">รายการเลยกำหนด</div></div>
-    <div class="card"><div class="num">{{ "{:,.0f}".format(total_fine) }} ฿</div><div class="label">ยอดค่าปรับรวม</div></div>
-    <div class="card"><div class="num">{{ total_records }}</div><div class="label">รายการยืมทั้งหมด</div></div>
-  </div>
-
-  <div class="actions">
-    <form method="POST" action="{{ url_for('run_check') }}" style="display:inline">
-      <button type="submit">🔍 ตรวจสอบวันคืน + ส่งแจ้งเตือน LINE ตอนนี้</button>
-    </form>
-  </div>
-
-  <table>
-    <thead>
-      <tr>
-        <th>#</th><th>ผู้ยืม</th><th>อุปกรณ์</th><th>กำหนดคืน</th><th>วันคืนจริง</th>
-        <th>สถานะ</th><th>ค่าปรับ</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for r in records %}
-      <tr class="{{ 'overdue' if r.is_overdue else '' }}">
-        <td>{{ r.record_id }}</td>
-        <td>{{ r.full_name }}</td>
-        <td>{{ r.equipment_name }}</td>
-        <td>{{ r.due_date }}</td>
-        <td>{{ r.return_date or '—' }}</td>
-        <td>
-          {% if r.return_date %}
-            <span class="badge ok">คืนแล้ว</span>
-          {% elif r.is_overdue %}
-            <span class="badge overdue">เลยกำหนด</span>
-            {% if r.notified %}<span class="badge notified">แจ้งเตือนแล้ว</span>{% endif %}
-          {% else %}
-            <span class="badge ok">ยังไม่ถึงกำหนด</span>
-          {% endif %}
-        </td>
-        <td>{{ "{:,.0f}".format(r.fine_amount) }} บาท</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-
-  <p style="margin-top:1.5rem; color:#9ca3af; font-size:0.8rem;">
-    อัตราค่าปรับ: {{ rate }} บาท/วัน &middot; โหมดแจ้งเตือน: dry-run / live (ขึ้นอยู่กับการตั้งค่า LINE Token)
-  </p>
+<p>placeholder</p>
 </body>
 </html>
 """
 
 
 def ensure_db():
-    """ถ้ายังไม่มีไฟล์ฐานข้อมูล ให้สร้างจำลองขึ้นมาก่อนครั้งแรก"""
     if not os.path.exists(DB_PATH):
         conn = init_mock_db()
         conn.close()
@@ -152,8 +67,6 @@ def index():
         d["is_overdue"] = (d["return_date"] is None) and (d["fine_amount"] > 0 or False)
         records.append(d)
 
-    # เช็ก overdue แบบ real-time เพิ่มเติม (เผื่อยังไม่เคยกดปุ่มตรวจสอบ)
-    from fine_calculator import calculate_fine
     for d in records:
         if d["return_date"] is None:
             result = calculate_fine(d["due_date"])
@@ -179,8 +92,6 @@ def run_check():
     conn = get_connection()
     overdue_list = check_and_update_fines(conn, rate_per_day=DEFAULT_FINE_RATE_PER_DAY)
 
-    # ถ้ามีการตั้งค่า LINE_CHANNEL_TOKEN ไว้ใน environment variable จะส่งข้อความจริง
-    # ถ้าไม่มี จะเป็น dry-run (จำลองการส่ง) โดยอัตโนมัติ
     line_token = os.environ.get("LINE_CHANNEL_TOKEN")
     notifier = LineNotifier(channel_access_token=line_token, dry_run=not bool(line_token))
     sent = 0
@@ -202,13 +113,92 @@ def run_check():
     return redirect(url_for("index"))
 
 
-# --- ส่วนที่เพิ่มเข้ามาใหม่: Webhook สำหรับรับ userId จาก LINE ---
+@app.route('/book', methods=['GET', 'POST'])
+def handle_booking():
+    if request.method == 'POST':
+        user_id = request.form['user_id']
+        equipment_id = request.form['equipment_id']
+        borrow_date = request.form['start_date']
+        due_date = request.form['end_date']
+
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        # ด่านที่ 1: ตรวจสอบสิทธิ์ ใช้โมดูลกลาง eligibility_checker.py
+        # (เช็กครบทั้งของค้างคืนที่ยังเลยกำหนด และค่าปรับค้างจ่าย ไม่ใช่แค่ค่าปรับอย่างเดียว)
+        eligibility = check_eligibility(conn, user_id)
+        if not eligibility["eligible"]:
+            conn.close()
+            reasons_text = " / ".join(eligibility["reasons"])
+            return f"❌ ขออภัย! ไม่สามารถยืมอุปกรณ์ใหม่ได้: {reasons_text}"
+
+        cursor.execute('''
+            SELECT * FROM borrow_records 
+            WHERE equipment_id = ? 
+            AND return_date IS NULL
+            AND (borrow_date <= ? AND due_date >= ?)
+        ''', (equipment_id, due_date, borrow_date))  # ด่านที่ 2: เช็กการจองซ้ำ (overlap check)
+
+        existing = cursor.fetchone()
+
+        if existing:
+            conn.close()
+            return "❌ ขออภัย! อุปกรณ์ชิ้นนี้ถูกยืมหรือจองในช่วงเวลาดังกล่าวแล้ว"
+
+        cursor.execute('''
+            INSERT INTO borrow_records (user_id, equipment_id, borrow_date, due_date, return_date, fine_amount, fine_paid, notified)
+            VALUES (?, ?, ?, ?, NULL, 0.0, 0, 0)
+        ''', (user_id, equipment_id, borrow_date, due_date))
+
+        conn.commit()
+        conn.close()
+
+        return "✅ ตรวจสอบสิทธิ์ผ่านและจองอุปกรณ์สำเร็จเรียบร้อยแล้ว!"
+
+    return "🚧 หน้าฟอร์มจองกำลังพัฒนาโดย Front-end (หลังบ้านพร้อมรับข้อมูลแล้ว)"
+
+
+@app.route('/return/<int:record_id>', methods=['GET', 'POST'])
+def return_equipment(record_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('SELECT due_date FROM borrow_records WHERE record_id = ?', (record_id,))
+    record = cursor.fetchone()
+
+    if not record:
+        conn.close()
+        return "❌ ไม่พบรายการยืมนี้ในระบบ"
+
+    due_date_str = record['due_date']
+    current_date_str = date.today().isoformat()
+
+    # ใช้ calculate_fine() จาก fine_calculator.py แทนการคำนวณเอง
+    # (จุดเดียวที่กำหนดสูตรและอัตราค่าปรับ ไม่ซ้ำซ้อน ไม่ต้องแก้หลายที่ถ้าอัตราเปลี่ยน)
+    result = calculate_fine(
+        due_date=due_date_str,
+        return_date=current_date_str,
+        rate_per_day=DEFAULT_FINE_RATE_PER_DAY,
+    )
+    fine_amount = result["fine_amount"]
+
+    cursor.execute('''
+        UPDATE borrow_records 
+        SET return_date = ?, fine_amount = ?
+        WHERE record_id = ?
+    ''', (current_date_str, fine_amount, record_id))
+
+    conn.commit()
+    conn.close()
+
+    return f"✅ บันทึกการคืนอุปกรณ์ (รายการที่ {record_id}) สำเร็จ! (ยอดค่าปรับ: {fine_amount} บาท)"
+
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     signature = request.headers.get('X-Line-Signature', '')
     body = request.get_data(as_text=True)
 
-    # ตรวจสอบลายเซ็น (Signature Verification) ถ้ามีการตั้งค่า Channel Secret ไว้
     if LINE_CHANNEL_SECRET:
         hash = hmac.new(LINE_CHANNEL_SECRET.encode('utf-8'),
                         body.encode('utf-8'),
@@ -223,21 +213,30 @@ def webhook():
         events = data.get('events', [])
 
         for event in events:
-            # ดึงข้อมูลเมื่อมีผู้ใช้งานกด Add Friend (follow event)
             if event.get('type') == 'follow':
-                user_id = event.get('source', {}).get('userId')
-                if user_id:
+                line_user_id = event.get('source', {}).get('userId')
+                if line_user_id:
                     ensure_db()
                     conn = get_connection()
                     cursor = conn.cursor()
-                    # บันทึก userId ลงตาราง users (ป้องกันซ้ำด้วย INSERT OR IGNORE)
-                    cursor.execute("""
-                        INSERT OR IGNORE INTO users (user_id) 
-                        VALUES (?)
-                    """, (user_id,))
-                    conn.commit()
+                    # เช็กก่อนว่า line_user_id นี้เคยถูกบันทึกไว้แล้วหรือยัง (กันซ้ำ)
+                    existing = cursor.execute(
+                        "SELECT user_id FROM users WHERE line_user_id = ?",
+                        (line_user_id,),
+                    ).fetchone()
+                    if not existing:
+                        # follow event ของ LINE ไม่มีข้อมูลว่าเป็นนักศึกษาคนไหน
+                        # จึงสร้างเป็น "ผู้ใช้รอผูกข้อมูล" ไว้ก่อน ให้เจ้าหน้าที่
+                        # ไปจับคู่กับนักศึกษาจริงทีหลัง (เช่น ผ่านรหัสนักศึกษา)
+                        cursor.execute(
+                            """
+                            INSERT INTO users (full_name, student_id, role, line_user_id)
+                            VALUES (?, NULL, 'unlinked', ?)
+                            """,
+                            ("ผู้ใช้รอผูกข้อมูล (LINE)", line_user_id),
+                        )
+                        conn.commit()
                     conn.close()
-                    print(f"Saved new user_id from LINE: {user_id}")
     except Exception as e:
         print(f"Webhook Error: {e}")
 
@@ -246,8 +245,6 @@ def webhook():
 
 if __name__ == "__main__":
     ensure_db()
-    # PORT: บริการโฮสติ้งอย่าง Render จะกำหนด environment variable นี้มาให้เอง
-    # DEBUG=1: ตั้งค่านี้เฉพาะตอนพัฒนาในเครื่องตัวเอง ห้ามเปิดตอนใช้งานจริง (ไม่ปลอดภัย)
     port = int(os.environ.get("PORT", 5000))
     debug_mode = os.environ.get("DEBUG", "0") == "1"
     host = "0.0.0.0" if os.environ.get("PORT") else "127.0.0.1"
