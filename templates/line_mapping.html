@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <title>เชื่อมต่อ LINE | ยืมคืนกล้อง</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+
+<header class="topbar">
+
+    <a class="brand" href="/booking">
+        <span class="brand-logo"></span>
+        ยืมคืนกล้อง
+    </a>
+
+    <nav class="nav">
+        <a href="/booking">จองอุปกรณ์</a>
+        <a href="/">แดชบอร์ดเจ้าหน้าที่</a>
+        <a class="active" href="/line-mapping">เชื่อมต่อ LINE</a>
+    </nav>
+
+</header>
+
+
+<main class="container">
+
+    <div class="panel" style="max-width: 650px; margin: 40px auto;">
+
+        <h1>เชื่อมต่อบัญชี LINE</h1>
+
+        <p class="meta">
+            กรุณากรอกรหัสประจำตัวของผู้ยืม
+            เพื่อเชื่อมต่อกับบัญชี LINE
+            สำหรับรับการแจ้งเตือน
+        </p>
+
+
+        <!-- สถานะ LINE -->
+
+        <div id="lineStatus"
+             class="flash"
+             style="margin: 20px 0;">
+
+            กำลังตรวจสอบการเชื่อมต่อ LINE...
+            
+        </div>
+
+
+        <!-- FORM -->
+
+        <form id="lineMappingForm">
+
+            <!-- LINE userId ที่ได้รับจาก LINE -->
+
+            <div class="field">
+
+                <label class="lbl" for="line_user_id">
+                    LINE User ID
+                </label>
+
+                <input
+                    type="text"
+                    id="line_user_id"
+                    name="line_user_id"
+                    placeholder="LINE User ID"
+                    readonly
+                    required
+                >
+
+            </div>
+
+
+            <!-- รหัสผู้ยืม -->
+
+            <div class="field">
+
+                <label class="lbl" for="user_id">
+                    รหัสประจำตัวผู้ยืม
+                </label>
+
+                <input
+                    type="text"
+                    id="user_id"
+                    name="user_id"
+                    placeholder="เช่น 6612345678"
+                    required
+                >
+
+            </div>
+
+
+            <button
+                type="submit"
+                class="btn btn-amber btn-block"
+                style="margin-top: 20px;">
+
+                🔗 เชื่อมต่อบัญชี LINE
+
+            </button>
+
+        </form>
+
+
+        <!-- ผลลัพธ์ -->
+
+        <div id="result"
+             style="margin-top: 20px;">
+        </div>
+
+    </div>
+
+</main>
+
+
+<script>
+
+    /*
+     * รับ LINE userId จาก URL
+     *
+     * ตัวอย่าง:
+     *
+     * /line-mapping?userId=Uxxxxxxxxxxxx
+     */
+
+    const params = new URLSearchParams(window.location.search);
+
+    const lineUserId = params.get("userId");
+
+
+    const lineUserIdInput =
+        document.getElementById("line_user_id");
+
+    const statusBox =
+        document.getElementById("lineStatus");
+
+    const resultBox =
+        document.getElementById("result");
+
+
+    // ถ้ามี userId ส่งมา
+
+    if (lineUserId) {
+
+        lineUserIdInput.value = lineUserId;
+
+        statusBox.className = "flash success";
+
+        statusBox.textContent =
+            "✅ พบ LINE User ID แล้ว กรุณากรอกรหัสประจำตัวเพื่อเชื่อมต่อ";
+
+    }
+
+    // ถ้าไม่มี userId
+
+    else {
+
+        statusBox.className = "flash error";
+
+        statusBox.textContent =
+            "❌ ไม่พบ LINE User ID กรุณาเข้าหน้านี้ผ่านลิงก์จากระบบ LINE";
+
+    }
+
+
+    /*
+     * ส่งข้อมูลไป Backend
+     */
+
+    document
+        .getElementById("lineMappingForm")
+        .addEventListener("submit", async function(e) {
+
+            e.preventDefault();
+
+
+            const userId =
+                document.getElementById("user_id").value.trim();
+
+            const lineId =
+                document.getElementById("line_user_id").value.trim();
+
+
+            if (!lineId) {
+
+                resultBox.innerHTML =
+                    '<div class="flash error">❌ ไม่พบ LINE User ID</div>';
+
+                return;
+            }
+
+
+            if (!userId) {
+
+                resultBox.innerHTML =
+                    '<div class="flash error">❌ กรุณากรอกรหัสประจำตัว</div>';
+
+                return;
+            }
+
+
+            try {
+
+                const response = await fetch("/line/link", {
+
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+
+                    body: JSON.stringify({
+
+                        user_id: userId,
+
+                        line_user_id: lineId
+
+                    })
+
+                });
+
+
+                const data = await response.json();
+
+
+                if (response.ok && data.success) {
+
+                    resultBox.innerHTML =
+                        '<div class="flash success">' +
+                        '✅ เชื่อมต่อบัญชี LINE สำเร็จ' +
+                        '</div>';
+
+                    statusBox.className =
+                        "flash success";
+
+                    statusBox.textContent =
+                        "✅ บัญชี LINE เชื่อมต่อกับรหัสประจำตัวเรียบร้อยแล้ว";
+
+                }
+
+                else {
+
+                    resultBox.innerHTML =
+                        '<div class="flash error">' +
+                        '❌ ' +
+                        (data.message || "ไม่สามารถเชื่อมต่อบัญชีได้") +
+                        '</div>';
+
+                }
+
+            }
+
+            catch (error) {
+
+                resultBox.innerHTML =
+                    '<div class="flash error">' +
+                    '❌ ไม่สามารถเชื่อมต่อกับระบบได้' +
+                    '</div>';
+
+            }
+
+        });
+
+</script>
+
+</body>
+</html>
