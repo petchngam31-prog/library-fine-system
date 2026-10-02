@@ -23,7 +23,8 @@ from eligibility_checker import check_eligibility
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-only-change-this-in-production")
 
-LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "")
+LINE_CHANNEL_SECRET = "901bf8bf3b7a8708acaa61a9d6fd25b7"
+LINE_CHANNEL_TOKEN = "pAregB0v0D4C3XTPFn5eXj3bJnwdl9NAgIvBZZW48v/V7CM3BZARCeejXeocIZWaNXREAFxWU4oaFbN5g4PCAwBTwHhw3V1JpVlcCGK61iKmQq49ZDN0P/2optvr04xyGGNAl82SiKkOBBMwe4YYlgdB04t89/1O/w1cDnyilFU="
 
 PAGE_TEMPLATE = """
 <!DOCTYPE html>
@@ -92,7 +93,7 @@ def run_check():
     conn = get_connection()
     overdue_list = check_and_update_fines(conn, rate_per_day=DEFAULT_FINE_RATE_PER_DAY)
 
-    line_token = os.environ.get("LINE_CHANNEL_TOKEN")
+    line_token = os.environ.get("LINE_CHANNEL_TOKEN") or LINE_CHANNEL_TOKEN
     notifier = LineNotifier(channel_access_token=line_token, dry_run=not bool(line_token))
     sent = 0
     for item in overdue_list:
@@ -124,8 +125,6 @@ def handle_booking():
         conn = get_connection()
         cursor = conn.cursor()
 
-        # ด่านที่ 1: ตรวจสอบสิทธิ์ ใช้โมดูลกลาง eligibility_checker.py
-        # (เช็กครบทั้งของค้างคืนที่ยังเลยกำหนด และค่าปรับค้างจ่าย ไม่ใช่แค่ค่าปรับอย่างเดียว)
         eligibility = check_eligibility(conn, user_id)
         if not eligibility["eligible"]:
             conn.close()
@@ -137,7 +136,7 @@ def handle_booking():
             WHERE equipment_id = ? 
             AND return_date IS NULL
             AND (borrow_date <= ? AND due_date >= ?)
-        ''', (equipment_id, due_date, borrow_date))  # ด่านที่ 2: เช็กการจองซ้ำ (overlap check)
+        ''', (equipment_id, due_date, borrow_date))
 
         existing = cursor.fetchone()
 
@@ -173,8 +172,6 @@ def return_equipment(record_id):
     due_date_str = record['due_date']
     current_date_str = date.today().isoformat()
 
-    # ใช้ calculate_fine() จาก fine_calculator.py แทนการคำนวณเอง
-    # (จุดเดียวที่กำหนดสูตรและอัตราค่าปรับ ไม่ซ้ำซ้อน ไม่ต้องแก้หลายที่ถ้าอัตราเปลี่ยน)
     result = calculate_fine(
         due_date=due_date_str,
         return_date=current_date_str,
@@ -212,22 +209,25 @@ def webhook():
         data = json.loads(body)
         events = data.get('events', [])
 
+        # 🔑 กำหนด LINE User ID ของเจ้าหน้าที่ (Admin) สำหรับทดสอบสั่งการผ่านแชท
+        ADMIN_LINE_IDS = ["Ubd5423c296e823b727c730f0e844b271"]
+
         for event in events:
-            if event.get('type') == 'follow':
+            print(">>> LINE User ID ของคุณคือ:", event.get('source', {}).get('userId'), flush=True)
+            event_type = event.get('type')
+
+            # --- กรณีที่ 1: ผู้ใช้กดเพิ่มเพื่อน (Follow) ---
+            if event_type == 'follow':
                 line_user_id = event.get('source', {}).get('userId')
                 if line_user_id:
                     ensure_db()
                     conn = get_connection()
                     cursor = conn.cursor()
-                    # เช็กก่อนว่า line_user_id นี้เคยถูกบันทึกไว้แล้วหรือยัง (กันซ้ำ)
                     existing = cursor.execute(
                         "SELECT user_id FROM users WHERE line_user_id = ?",
                         (line_user_id,),
                     ).fetchone()
                     if not existing:
-                        # follow event ของ LINE ไม่มีข้อมูลว่าเป็นนักศึกษาคนไหน
-                        # จึงสร้างเป็น "ผู้ใช้รอผูกข้อมูล" ไว้ก่อน ให้เจ้าหน้าที่
-                        # ไปจับคู่กับนักศึกษาจริงทีหลัง (เช่น ผ่านรหัสนักศึกษา)
                         cursor.execute(
                             """
                             INSERT INTO users (full_name, student_id, role, line_user_id)
@@ -237,6 +237,36 @@ def webhook():
                         )
                         conn.commit()
                     conn.close()
+
+            # --- กรณีที่ 2: มีข้อความส่งเข้ามาในแชท (รองรับคำสั่งแอดมิน) ---
+            elif event_type == 'message':
+                message = event.get('message', {})
+                if message.get('type') == 'text':
+                    user_line_id = event.get('source', {}).get('userId')
+                    text_command = message.get('text').strip()
+
+                    # ตรวจสอบสิทธิ์ว่าเป็นแอดมินหรือไม่
+                    if user_line_id in ADMIN_LINE_IDS:
+                        line_token = os.environ.get("LINE_CHANNEL_TOKEN") or LINE_CHANNEL_TOKEN
+                        notifier = LineNotifier(channel_access_token=line_token, dry_run=not bool(line_token))
+
+                        # คำสั่งขอสรุปยอดด่วน
+                        if text_command == "สรุปยอด" or text_command == "/summary":
+                            ensure_db()
+                            conn = get_connection()
+                            total_records = conn.execute("SELECT COUNT(*) FROM borrow_records").fetchone()[0]
+                            total_fine = conn.execute("SELECT SUM(fine_amount) FROM borrow_records").fetchone()[0] or 0.0
+                            conn.close()
+
+                            reply_message = (
+                                f"📊 [รายงานด่วนสำหรับแอดมิน]\n"
+                                f"----------------------------------\n"
+                                f"📌 จำนวนการยืมทั้งหมด: {total_records} รายการ\n"
+                                f"💰 ยอดค่าปรับค้างจ่ายรวม: {total_fine} บาท\n"
+                                f"สถานะระบบ: ปกติ ✅"
+                            )
+                            notifier.send(user_line_id, reply_message)
+
     except Exception as e:
         print(f"Webhook Error: {e}")
 
