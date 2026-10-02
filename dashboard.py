@@ -113,6 +113,94 @@ def run_check():
     flash(f"ตรวจสอบเสร็จสิ้น: พบรายการเลยกำหนด {len(overdue_list)} รายการ ส่งแจ้งเตือนสำเร็จ {sent} รายการ")
     return redirect(url_for("index"))
 
+from flask import request, jsonify
+from db_setup import get_connection  # เรียกใช้ฟังก์ชันเชื่อมต่อฐานข้อมูลจากไฟล์ db_setup.py
+
+# 1. API สำหรับผูกบัญชี LINE
+@app.route('/line/link', methods=['POST'])
+def line_link():
+    data = request.get_json()
+    if not data:
+        return jsonify({"success": False, "message": "Invalid or missing JSON body"}), 400
+        
+    user_id = data.get('user_id')         # รหัสประจำตัวนักศึกษา (เช่น '6412345001')
+    line_user_id = data.get('line_user_id') # LINE userId (เช่น 'Uxxxxxxxxxxxx')
+    
+    if not user_id or not line_user_id:
+        return jsonify({"success": False, "message": "Missing user_id or line_user_id"}), 400
+        
+    conn = get_connection()
+    try:
+        # เช็กว่ามีรหัสผู้ใช้นี้อยู่ในตาราง users หรือไม่ (เทียบกับ student_id)
+        user = conn.execute("SELECT * FROM users WHERE student_id = ?", (user_id,)).fetchone()
+        if not user:
+            return jsonify({"success": False, "message": "ไม่พบรหัสผู้ใช้ในระบบ"}), 400
+            
+        # เช็กว่า line_user_id นี้ถูกผูกกับคนอื่นไปแล้วหรือยัง
+        existing_line = conn.execute(
+            "SELECT * FROM users WHERE line_user_id = ? AND student_id != ?", 
+            (line_user_id, user_id)
+        ).fetchone()
+        
+        if existing_line:
+            return jsonify({"success": False, "message": "LINE บัญชีนี้ถูกเชื่อมต่อกับผู้ใช้อื่นแล้ว"}), 400
+            
+        # บันทึก / อัปเดต line_user_id ลงในฐานข้อมูล
+        conn.execute(
+            "UPDATE users SET line_user_id = ? WHERE student_id = ?", 
+            (line_user_id, user_id)
+        )
+        conn.commit()
+        
+        return jsonify({"success": True, "message": "เชื่อมต่อ LINE สำเร็จ"}), 200
+        
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        conn.close()
+
+
+# 2. API สำหรับตรวจสอบสถานะการผูก LINE
+@app.route('/line/status', methods=['GET'])
+def line_status():
+    user_id = request.args.get('user_id') # รับค่าผ่าน Query Parameter เช่น /line/status?user_id=6412345001
+    
+    if not user_id:
+        return jsonify({"linked": False, "message": "Missing user_id parameter"}), 400
+        
+    conn = get_connection()
+    try:
+        user = conn.execute("SELECT line_user_id FROM users WHERE student_id = ?", (user_id,)).fetchone()
+        
+        # ถ้าพบข้อมูลและมี line_user_id บันทึกไว้แล้ว
+        if user and user['line_user_id']:
+            return jsonify({
+                "linked": True,
+                "line_user_id": user['line_user_id']
+            }), 200
+        else:
+            return jsonify({
+                "linked": False,
+                "line_user_id": None
+            }), 200
+            
+    finally:
+        conn.close()
+
+
+# 3. API สำหรับรับ LINE userId (เชื่อมโยงกับหน้า /line-mapping)
+@app.route('/line-mapping', methods=['GET'])
+def line_mapping():
+    # รับค่า userId ที่ส่งมาจาก LINE OA (เช่น /line-mapping?userId=Uxxxxxxxxxxxx)
+    line_user_id = request.args.get('userId')
+    
+    # ส่งค่า line_user_id กลับไปให้ Front-end
+    return jsonify({
+        "status": "success",
+        "line_user_id": line_user_id,
+        "message": "Ready for LINE account mapping"
+    }), 200
+
 
 @app.route('/book', methods=['GET', 'POST'])
 def handle_booking():
