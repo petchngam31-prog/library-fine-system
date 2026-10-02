@@ -205,11 +205,26 @@ def line_mapping():
 @app.route('/book', methods=['GET', 'POST'])
 def handle_booking():
     if request.method == 'POST':
-        user_id = request.form['user_id']
-        equipment_id = request.form['equipment_id']
-        borrow_date = request.form['start_date']
-        due_date = request.form['end_date']
+        # 1. ใช้ .get() เพื่อป้องกัน KeyError หากฟอร์มส่งข้อมูลมาไม่ครบ
+        user_id = request.form.get('user_id')
+        equipment_id = request.form.get('equipment_id')
+        borrow_date = request.form.get('start_date')
+        due_date = request.form.get('end_date')
 
+        # 2. ตรวจสอบว่ากรอกข้อมูลครบทุกช่องหรือไม่
+        if not user_id or not equipment_id or not borrow_date or not due_date:
+            return "❌ กรุณากรอกข้อมูลให้ครบถ้วน (รหัสผู้ใช้, อุปกรณ์, วันที่ยืม และกำหนดคืน)", 400
+
+        # 3. ตรวจสอบความถูกต้องของรูปแบบวันที่และตรรกะวันยืม-คืน
+        try:
+            b_date = datetime.strptime(borrow_date, '%Y-%m-%d').date()
+            d_date = datetime.strptime(due_date, '%Y-%m-%d').date()
+            if d_date < b_date:
+                return "❌ วันกำหนดคืน (Due Date) ต้องไม่มาก่อนวันที่ยืม (Borrow Date)", 400
+        except ValueError:
+            return "❌ รูปแบบวันที่ไม่ถูกต้อง (ต้องอยู่ในรูปแบบ YYYY-MM-DD)", 400
+
+        # 4. เชื่อมต่อฐานข้อมูลและตรวจสอบสิทธิ์ตามระบบเดิม
         conn = get_connection()
         cursor = conn.cursor()
 
@@ -217,7 +232,7 @@ def handle_booking():
         if not eligibility["eligible"]:
             conn.close()
             reasons_text = " / ".join(eligibility["reasons"])
-            return f"❌ ขออภัย! ไม่สามารถยืมอุปกรณ์ใหม่ได้: {reasons_text}"
+            return f"❌ ขออภัย! ไม่สามารถยืมอุปกรณ์ใหม่ได้: {reasons_text}", 400
 
         cursor.execute('''
             SELECT * FROM borrow_records 
@@ -230,7 +245,7 @@ def handle_booking():
 
         if existing:
             conn.close()
-            return "❌ ขออภัย! อุปกรณ์ชิ้นนี้ถูกยืมหรือจองในช่วงเวลาดังกล่าวแล้ว"
+            return "❌ ขออภัย! อุปกรณ์ชิ้นนี้ถูกยืมหรือจองในช่วงเวลาดังกล่าวแล้ว", 400
 
         cursor.execute('''
             INSERT INTO borrow_records (user_id, equipment_id, borrow_date, due_date, return_date, fine_amount, fine_paid, notified)
@@ -240,10 +255,9 @@ def handle_booking():
         conn.commit()
         conn.close()
 
-        return "✅ ตรวจสอบสิทธิ์ผ่านและจองอุปกรณ์สำเร็จเรียบร้อยแล้ว!"
+        return "✅ ตรวจสอบสิทธิ์ผ่านและจองอุปกรณ์สำเร็จเรียบร้อยแล้ว!", 200
 
     return "🚧 หน้าฟอร์มจองกำลังพัฒนาโดย Front-end (หลังบ้านพร้อมรับข้อมูลแล้ว)"
-
 
 @app.route('/return/<int:record_id>', methods=['GET', 'POST'])
 def return_equipment(record_id):
