@@ -6,31 +6,21 @@
   <title>จองอุปกรณ์ | ยืมคืนกล้อง</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 
 <header class="topbar">
-  <a class="brand" href="/booking"><span class="brand-logo"></span>ยืมคืนกล้อง</a>
+  <a class="brand" href="/"><span class="brand-logo"></span>ยืมคืนกล้อง</a>
   <nav class="nav">
-    <a class="active" href="/booking">จองอุปกรณ์</a>
-    <a href="/history">ประวัติการยืม</a>
-    <a href="/">แดชบอร์ดเจ้าหน้าที่</a>
+    <a class="active" href="/">จองอุปกรณ์</a>
+    <a href="/history.html">ประวัติการยืม</a>
+    <a href="/admin">แดชบอร์ดเจ้าหน้าที่</a>
   </nav>
 </header>
 
 <main class="container">
-
-  <!-- Flash message จาก Backend (flash("...", "success") หรือ "error") -->
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-    <div class="flash-area">
-      {% for category, message in messages %}
-        <div class="flash {{ category }}">{{ '✅' if category == 'success' else '❌' }} {{ message }}</div>
-      {% endfor %}
-    </div>
-    {% endif %}
-  {% endwith %}
+  <div class="flash-area" id="flash-area"></div>
 
   <div class="steps">
     <span class="step active" id="stepLabel1">1 เลือกอุปกรณ์</span><span class="sep"></span>
@@ -38,67 +28,15 @@
     <span class="step" id="stepLabel3">3 ยืนยัน</span>
   </div>
 
-  <!-- ถ้า Backend ยังไม่ส่ง equipments มา จะใช้ข้อมูลตัวอย่างด้านล่างแทน -->
-  {% set items = equipments if equipments is defined else [
-    {'id': 1, 'name': 'กล้อง Canon EOS R50', 'desc': 'Mirrorless Camera', 'category': 'camera', 'available': 10},
-    {'id': 2, 'name': 'กล้องภาพนิ่ง Nikon 3300', 'desc': 'กระเป๋า + สายชาร์จ + แท่นชาร์จ + เมมโมรี่การ์ด', 'category': 'camera', 'available': 16},
-    {'id': 3, 'name': 'ขาตั้งกล้อง Sony', 'desc': 'ยี่ห้อ Sony', 'category': 'tripod', 'available': 15},
-    {'id': 4, 'name': 'กล้องภาพนิ่ง Canon 700D', 'desc': 'กระเป๋า + สายชาร์จ + แท่นชาร์จ + เมมโมรี่การ์ด', 'category': 'camera', 'available': 30},
-    {'id': 5, 'name': 'กล้องดิจิตอลวีดีโอ Panasonic HC-V700', 'desc': 'กล้องดิจิตอลวีดีโอ (2012)', 'category': 'video', 'available': 4},
-    {'id': 6, 'name': 'ขาตั้งกล้อง Fancier', 'desc': 'ขาตั้งกล้อง หัวบอล', 'category': 'tripod', 'available': 10}
-  ] %}
-
-  <!-- รูปอุปกรณ์: ไฟล์อยู่ที่ static/images/ (ถ้า Backend ส่ง e.image มา จะใช้ค่านั้นก่อน) -->
-  {% set images = {1: 'canon.jpeg', 2: 'nikon.jpeg', 3: 'sony_tripod.jpeg', 4: 'canon_700d.jpeg', 5: 'panasonic.jpeg', 6: 'fancier.jpeg'} %}
-
-  <!-- ลิงก์เพิ่มเพื่อน LINE: เปลี่ยน @YOUR_LINE_ID เป็น LINE ID ของบัญชี Official Account
-       (หรือให้ Backend ส่งตัวแปร line_oa_url เข้ามาก็ได้) -->
-  {% set line_oa_url = line_oa_url if line_oa_url is defined else 'https://lin.ee/S1A0Px6' %}
-
-  <form id="bookForm" method="POST" action="/book">
+  <form id="bookForm">
     <div class="layout">
 
-      <!-- ===== ฝั่งซ้าย ===== -->
       <div>
-
         <!-- STEP 1: เลือกอุปกรณ์ -->
         <section id="step1">
-          <div class="chips" id="chips">
-            <button type="button" class="chip active" data-cat="all">ทั้งหมด · <span data-count="all"></span></button>
-            <button type="button" class="chip" data-cat="camera">กล้องถ่ายภาพ · <span data-count="camera"></span></button>
-            <button type="button" class="chip" data-cat="video">กล้องวิดีโอ · <span data-count="video"></span></button>
-            <button type="button" class="chip" data-cat="tripod">ขาตั้งกล้อง · <span data-count="tripod"></span></button>
-          </div>
-
-          <input class="search" type="search" id="search" placeholder="ค้นหากล้อง เช่น Canon, Nikon, Panasonic" aria-label="ค้นหากล้อง">
-
-          <div class="grid" id="grid">
-            {% for e in items %}
-            <label class="card" data-cat="{{ e.category }}" data-name="{{ e.name }}">
-              <!-- name="equipment_id" ตรงกับที่ Backend ต้องการ -->
-              <input type="checkbox" name="equipment_id" value="{{ e.id }}" {{ 'disabled' if e.available == 0 }}>
-              {% set img = e.image if e.image is defined and e.image else images.get(e.id) %}
-              <div class="card-img">
-                {% if img %}
-                  <img src="{{ url_for('static', filename='images/' ~ img) }}" alt="{{ e.name }}" loading="lazy" onerror="this.remove()">
-                {% else %}
-                  {{ {'camera': '📷', 'video': '🎥', 'tripod': '📐'}.get(e.category, '📦') }}
-                {% endif %}
-              </div>
-              <div class="card-body">
-                <h3 class="card-title">{{ e.name }}</h3>
-                <p class="card-desc">{{ e.desc }}</p>
-                {% if e.available > 0 %}
-                  <p class="stock">พร้อมให้ยืม {{ e.available }} ชิ้น</p>
-                  <span class="pick pick-off">+ เลือก</span>
-                  <span class="pick pick-on">เลือกแล้ว ✓</span>
-                {% else %}
-                  <p class="stock out">ไม่ว่าง</p>
-                {% endif %}
-              </div>
-            </label>
-            {% endfor %}
-          </div>
+          <div class="chips" id="chips"></div>
+          <input class="search" type="search" id="search" placeholder="ค้นหาอุปกรณ์ เช่น Canon, Rode" aria-label="ค้นหาอุปกรณ์">
+          <div class="grid" id="grid"><p class="loading">กำลังโหลดรายการอุปกรณ์...</p></div>
         </section>
 
         <!-- STEP 2: เลือกวัน-เวลา -->
@@ -107,7 +45,8 @@
           <div class="form-grid">
             <div class="field full">
               <label class="lbl" for="user_id">รหัสผู้ยืม</label>
-              <input type="text" id="user_id" name="user_id" placeholder="เช่น 6612345678" required>
+              <input type="text" id="user_id" name="user_id" placeholder="กรอกรหัสผู้ยืม (เช่น 1, 2)" required>
+              <span class="helper">ทดสอบกรอกเป็นตัวเลข user_id ในระบบ (เช่น 1, 2, 3)</span>
             </div>
             <div class="field">
               <label class="lbl" for="start_date">วันที่รับอุปกรณ์</label>
@@ -134,109 +73,255 @@
         </section>
       </div>
 
-      <!-- ===== ฝั่งขวา: สรุปรายการ ===== -->
       <aside class="side">
-      <div class="panel summary">
-        <h2 id="summaryTitle">รายการที่เลือก (0)</h2>
-        <ul class="summary-list" id="summaryList"></ul>
-        <p class="meta">ผู้ให้บริการ: การเรียนการสอน ชั้น 2<br>ผู้ดูแล: อุสมาน ตาเละ</p>
+        <div class="panel summary">
+          <h2 id="summaryTitle">รายการที่เลือก (0)</h2>
+          <ul class="summary-list" id="summaryList"></ul>
+          <p class="meta">ผู้ให้บริการ: การเรียนการสอน ชั้น 2<br>ผู้ดูแล: อุสมาน ตาเละ</p>
+          <button type="button" class="btn btn-amber btn-block" id="nextBtn">เลือกวัน-เวลา →</button>
+          <button type="submit" class="btn btn-block" id="submitBtn" hidden>ยืนยันการขอยืม</button>
+          <button type="button" class="btn btn-outline btn-block" id="backBtn" hidden>← กลับไปเลือกอุปกรณ์</button>
+        </div>
 
-        <button type="button" class="btn btn-amber btn-block" id="nextBtn">เลือกวัน-เวลา →</button>
-        <button type="submit" class="btn btn-block" id="submitBtn" hidden>ยืนยันการขอยืม</button>
-        <button type="button" class="btn btn-outline btn-block" id="backBtn" hidden>← กลับไปเลือกอุปกรณ์</button>
-      </div>
-
-      <!-- เพิ่มเพื่อน LINE เพื่อรับแจ้งเตือนวันกำหนดคืน -->
-      <div class="panel line-card">
-        <h2>รับแจ้งเตือนทาง LINE</h2>
-        <p class="line-text">เพิ่มเพื่อน LINE ของระบบ เพื่อรับแจ้งเตือนวันกำหนดคืนอุปกรณ์</p>
-        <!-- วางรูป QR ไว้ที่ static/line_qr.png (ถ้าไม่มีรูป จะซ่อนไปเอง) -->
-        <img class="line-qr" src="{{ url_for('static', filename='line_qr.png') }}" alt="QR Code เพิ่มเพื่อน LINE" onerror="this.remove()">
-        <a class="btn btn-line btn-block" href="{{ line_oa_url }}" target="_blank" rel="noopener">เพิ่มเพื่อน LINE</a>
-      </div>
+        <div class="panel line-card">
+          <h2>รับแจ้งเตือนทาง LINE</h2>
+          <p class="line-text">เพิ่มเพื่อน LINE ของระบบ เพื่อรับแจ้งเตือนวันกำหนดคืนอุปกรณ์</p>
+          <a class="btn btn-line btn-block" id="lineBtn" href="https://lin.ee/S1A0Px6" target="_blank" rel="noopener">เพิ่มเพื่อน LINE</a>
+        </div>
       </aside>
 
     </div>
   </form>
 </main>
 
+<script src="/static/app.js"></script>
 <script>
-  const $ = (s) => document.querySelector(s);
-  const cards = [...document.querySelectorAll('.card')];
-  let activeCat = 'all';
+ // ผูก ID อุปกรณ์กับไฟล์รูปภาพใน static ให้ตรงเป๊ะ
+  const EQUIPMENT_IMAGES = {
+    1: "/static/canon.jpeg",          // กล้อง Canon EOS R50
+    2: "/static/fancier.jpeg",        // ขาตั้งกล้อง Fancier
+    3: "/static/nikon.jpeg",          // กล้องภาพนิ่ง Nikon D3300
+    4: "/static/canon_700d.jpeg",     // กล้องภาพนิ่ง Canon EOS 700D
+    5: "/static/panasonic.jpeg",      // กล้องวิดีโอ Panasonic
+    6: "/static/sony_tripod.jpeg"     // ขาตั้งกล้อง Sony
+  };
 
-  // --- นับจำนวนในแต่ละหมวด ---
-  document.querySelectorAll('[data-count]').forEach((el) => {
-    const c = el.dataset.count;
-    el.textContent = c === 'all' ? cards.length : cards.filter((k) => k.dataset.cat === c).length;
-  });
+  const CATEGORY_LABELS = { 
+    camera: "กล้องถ่ายภาพ", 
+    video: "กล้องวิดีโอ", 
+    tripod: "ขาตั้งกล้อง", 
+    audio: "อุปกรณ์บันทึกเสียง" 
+  };
+  
+  const CATEGORY_ICONS = { 
+    camera: "📷", 
+    video: "🎥", 
+    tripod: "📐", 
+    audio: "🎙" 
+  };
 
-  // --- กรองหมวด + ค้นหา ---
+  // ข้อมูลอุปกรณ์ยืม-คืนกล้องที่ตรงกับชื่อและรูปถ่าย
+  const FALLBACK_EQUIPMENT = [
+    { equipment_id: 1, equipment_name: "กล้อง Canon EOS R50", category: "camera", status: "available" },
+    { equipment_id: 2, equipment_name: "ขาตั้งกล้อง Fancier", category: "tripod", status: "available" },
+    { equipment_id: 3, equipment_name: "กล้องภาพนิ่ง Nikon D3300", category: "camera", status: "available" },
+    { equipment_id: 4, equipment_name: "กล้องภาพนิ่ง Canon EOS 700D", category: "camera", status: "available" },
+    { equipment_id: 5, equipment_name: "กล้องดิจิตอลวิดีโอ Panasonic HC-V700", category: "video", status: "available" },
+    { equipment_id: 6, equipment_name: "ขาตั้งกล้อง Sony", category: "tripod", status: "available" }
+  ];
+
+  let equipment = [];
+  let activeCat = "all";
+  const selected = new Set();
+
+  // Helper สำหรับเลือก element
+  const getEl = (sel) => document.querySelector(sel);
+
+  // ---------- โหลดรายการอุปกรณ์ ----------
+  async function loadEquipment() {
+    try {
+      if (typeof api === "function") {
+        const res = await api("/api/equipment");
+        const list = res && res.ok ? (res.data.equipment || res.data.items || res.data) : null;
+        if (Array.isArray(list) && list.length > 0) {
+          equipment = list;
+        } else {
+          equipment = FALLBACK_EQUIPMENT;
+        }
+      } else {
+        equipment = FALLBACK_EQUIPMENT;
+      }
+    } catch (err) {
+      console.warn("ใช้รายการสำรอง:", err);
+      equipment = FALLBACK_EQUIPMENT;
+    }
+    renderEquipment();
+  }
+
+  function renderEquipment() {
+    const grid = getEl("#grid");
+    const chips = getEl("#chips");
+    if (!grid || !chips) return;
+
+    const cats = [...new Set(equipment.map((e) => e.category).filter(Boolean))];
+    chips.innerHTML =
+      `<button type="button" class="chip active" data-cat="all">ทั้งหมด · ${equipment.length}</button>` +
+      cats.map((c) => `<button type="button" class="chip" data-cat="${c}">${CATEGORY_LABELS[c] || c} · ${equipment.filter((e) => e.category === c).length}</button>`).join("");
+
+    grid.innerHTML = equipment.map((e) => {
+      const free = (e.status || "available") === "available";
+      const img = EQUIPMENT_IMAGES[e.equipment_id];
+      return `
+      <label class="card" data-cat="${e.category || ''}" data-name="${e.equipment_name || ''}">
+        <input type="checkbox" value="${e.equipment_id}" ${free ? "" : "disabled"}>
+        <div class="card-img">${img ? `<img src="${img}" alt="${e.equipment_name}" loading="lazy" onerror="this.remove()">` : (CATEGORY_ICONS[e.category] || "📦")}</div>
+        <div class="card-body">
+          <h3 class="card-title">${e.equipment_name}</h3>
+          <p class="card-desc">${CATEGORY_LABELS[e.category] || e.category || ""}</p>
+          ${free
+            ? '<p class="stock">พร้อมให้ยืม</p><span class="pick pick-off">+ เลือก</span><span class="pick pick-on">เลือกแล้ว ✓</span>'
+            : '<p class="stock out">ไม่ว่าง</p>'}
+        </div>
+      </label>`;
+    }).join("");
+  }
+
+  // ---------- กรอง + ค้นหา ----------
   function applyFilter() {
-    const q = $('#search').value.trim().toLowerCase();
-    cards.forEach((card) => {
-      const okCat = activeCat === 'all' || card.dataset.cat === activeCat;
-      const okName = card.dataset.name.toLowerCase().includes(q);
-      card.hidden = !(okCat && okName);
+    const q = (getEl("#search")?.value || "").trim().toLowerCase();
+    document.querySelectorAll(".card").forEach((card) => {
+      const okCat = activeCat === "all" || card.dataset.cat === activeCat;
+      card.hidden = !(okCat && card.dataset.name.toLowerCase().includes(q));
     });
   }
-  document.querySelectorAll('.chip').forEach((chip) => {
-    chip.addEventListener('click', () => {
-      document.querySelectorAll('.chip').forEach((c) => c.classList.remove('active'));
-      chip.classList.add('active');
-      activeCat = chip.dataset.cat;
-      applyFilter();
-    });
-  });
-  $('#search').addEventListener('input', applyFilter);
 
-  // --- สรุปรายการที่เลือก ---
-  const selected = () => cards.filter((c) => c.querySelector('input').checked);
+  getEl("#chips")?.addEventListener("click", (e) => {
+    const chip = e.target.closest(".chip");
+    if (!chip) return;
+    document.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
+    chip.classList.add("active");
+    activeCat = chip.dataset.cat;
+    applyFilter();
+  });
+
+  getEl("#search")?.addEventListener("input", applyFilter);
+
+  // ---------- สรุปรายการที่เลือก ----------
+  const nameOf = (id) => (equipment.find((e) => String(e.equipment_id) === String(id)) || {}).equipment_name || id;
+
   function renderSummary() {
-    const list = selected();
-    $('#summaryTitle').textContent = `รายการที่เลือก (${list.length})`;
-    $('#summaryList').innerHTML = list.length
-      ? list.map((c) => `<li><span>${c.dataset.name}</span><span>× 1</span></li>`).join('')
-      : '<li class="empty">ยังไม่ได้เลือกอุปกรณ์</li>';
+    const title = getEl("#summaryTitle");
+    const list = getEl("#summaryList");
+    if (title) title.textContent = `รายการที่เลือก (${selected.size})`;
+    if (list) {
+      list.innerHTML = selected.size
+        ? [...selected].map((id) => `<li><span>${nameOf(id)}</span><span>× 1</span></li>`).join("")
+        : '<li class="empty">ยังไม่ได้เลือกอุปกรณ์</li>';
+    }
   }
-  cards.forEach((c) => c.querySelector('input').addEventListener('change', renderSummary));
+
+  getEl("#grid")?.addEventListener("change", (e) => {
+    if (e.target.type !== "checkbox") return;
+    if (e.target.checked) {
+      selected.add(e.target.value);
+    } else {
+      selected.delete(e.target.value);
+    }
+    renderSummary();
+  });
   renderSummary();
 
-  // --- สลับ Step ---
+  // ---------- สลับ Step ----------
   function goStep(n) {
-    $('#step1').hidden = n !== 1;
-    $('#step2').hidden = n !== 2;
-    $('#nextBtn').hidden = n !== 1;
-    $('#submitBtn').hidden = n !== 2;
-    $('#backBtn').hidden = n !== 2;
-    $('#stepLabel1').classList.toggle('active', n === 1);
-    $('#stepLabel2').classList.toggle('active', n === 2);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (getEl("#step1")) getEl("#step1").hidden = n !== 1;
+    if (getEl("#step2")) getEl("#step2").hidden = n !== 2;
+    if (getEl("#nextBtn")) getEl("#nextBtn").hidden = n !== 1;
+    if (getEl("#submitBtn")) getEl("#submitBtn").hidden = n !== 2;
+    if (getEl("#backBtn")) getEl("#backBtn").hidden = n !== 2;
+    getEl("#stepLabel1")?.classList.toggle("active", n === 1);
+    getEl("#stepLabel2")?.classList.toggle("active", n === 2);
   }
-  $('#nextBtn').addEventListener('click', () => {
-    if (!selected().length) { alert('กรุณาเลือกอุปกรณ์อย่างน้อย 1 รายการ'); return; }
+
+  getEl("#nextBtn")?.addEventListener("click", () => {
+    if (!selected.size) {
+      alert("กรุณาเลือกอุปกรณ์อย่างน้อย 1 รายการ");
+      return;
+    }
+    const flash = getEl("#flash-area");
+    if (flash) flash.innerHTML = "";
     goStep(2);
   });
-  $('#backBtn').addEventListener('click', () => goStep(1));
 
-  // --- วันที่: เลือกย้อนหลังไม่ได้ / วันคืนต้องไม่ก่อนวันรับ ---
-  const today = new Date().toISOString().split('T')[0];
-  $('#start_date').min = today;
-  $('#end_date').min = today;
-  $('#start_date').addEventListener('change', (e) => {
-    $('#end_date').min = e.target.value || today;
+  getEl("#backBtn")?.addEventListener("click", () => goStep(1));
+
+  // ตั้งค่าวันที่เริ่มต้น
+  const today = new Date().toISOString().split("T")[0];
+  const startInput = getEl("#start_date");
+  const endInput = getEl("#end_date");
+  if (startInput && endInput) {
+    startInput.min = today;
+    endInput.min = today;
+    startInput.addEventListener("change", (e) => { endInput.min = e.target.value || today; });
+  }
+
+  // ---------- ส่งข้อมูลการจอง (POST /api/book) ----------
+  getEl("#bookForm")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const userRaw = getEl("#user_id").value.trim();
+    const start = getEl("#start_date").value;
+    const end = getEl("#end_date").value;
+
+    if (end < start) {
+      alert("วันที่คืนต้องไม่ก่อนวันที่รับ");
+      return;
+    }
+
+    const btn = getEl("#submitBtn");
+    btn.disabled = true;
+    btn.textContent = "กำลังส่งคำขอ...";
+    const flash = getEl("#flash-area");
+    if (flash) flash.innerHTML = "";
+
+    const ids = [...selected];
+    let okCount = 0;
+
+    for (const id of ids) {
+      try {
+        const res = await fetch("/api/book", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: /^\d+$/.test(userRaw) ? Number(userRaw) : userRaw,
+            equipment_id: Number(id),
+            start_date: start,
+            end_date: end,
+          }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          okCount++;
+          if (flash) flash.innerHTML += `<div class="flash success">จองสำเร็จ: ${nameOf(id)}</div>`;
+        } else {
+          const reason = data.reasons ? " (" + data.reasons.join(", ") + ")" : "";
+          if (flash) flash.innerHTML += `<div class="flash error">${nameOf(id)}: ${data.message || "จองไม่สำเร็จ"}${reason}</div>`;
+        }
+      } catch (err) {
+        if (flash) flash.innerHTML += `<div class="flash error">เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์</div>`;
+      }
+    }
+
+    btn.disabled = false;
+    btn.textContent = "ยืนยันการขอยืม";
+
+    if (okCount === ids.length) {
+      selected.clear();
+      document.querySelectorAll(".card input").forEach((c) => (c.checked = false));
+      renderSummary();
+      goStep(1);
+    }
   });
 
-  // กดยืนยันแล้วให้เห็นว่ากำลังส่งคำขอ (และกันกดซ้ำ)
-  $('#bookForm').addEventListener('submit', () => {
-    const b = $('#submitBtn');
-    b.disabled = true;
-    b.textContent = 'กำลังส่งคำขอ...';
-  });
-
-  // เลื่อนไปที่ข้อความแจ้งผลจาก Backend
-  const flashArea = document.querySelector('.flash-area');
-  if (flashArea) flashArea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  loadEquipment();
 </script>
 </body>
 </html>

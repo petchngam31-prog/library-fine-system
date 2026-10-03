@@ -1,9 +1,7 @@
 """
 dashboard.py
 ============
-เว็บแดชบอร์ดอย่างง่ายสำหรับ "เจ้าหน้าที่" ใช้ดูรายการยืม-คืนอุปกรณ์
-รายการที่เลยกำหนด ค่าปรับ และสามารถกดปุ่มเพื่อสั่งให้ระบบตรวจสอบ +
-ส่งแจ้งเตือน LINE ได้จากหน้าเว็บโดยตรง พร้อมระบบจองและคืนอุปกรณ์
+ระบบยืม-คืนอุปกรณ์กล้อง สำหรับเจ้าหน้าที่และนักศึกษา
 """
 
 import base64
@@ -12,9 +10,9 @@ import hmac
 import json
 import os
 from datetime import date, datetime
-import sqlite3
-from flask import Flask, render_template, render_template_string, redirect, url_for, flash, request, abort
-from flask import Flask, request, render_template
+from functools import wraps
+
+from flask import Flask, render_template, render_template_string, request, jsonify, abort, redirect, url_for, flash, session
 
 from db_setup import init_mock_db, get_connection, DB_PATH
 from fine_calculator import check_and_update_fines, mark_as_notified, DEFAULT_FINE_RATE_PER_DAY, calculate_fine
@@ -22,24 +20,21 @@ from line_notify import LineNotifier
 from eligibility_checker import check_eligibility
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-only-change-this-in-production")
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-key-1234")
+ADMIN_PASSWORD = "admin1234"  # 🔑 รหัสผ่านเข้าแดชบอร์ดเจ้าหน้าที่
 
 LINE_CHANNEL_SECRET = "901bf8bf3b7a8708acaa61a9d6fd25b7"
 LINE_CHANNEL_TOKEN = "pAregB0v0D4C3XTPFn5eXj3bJnwdl9NAgIvBZZW48v/V7CM3BZARCeejXeocIZWaNXREAFxWU4oaFbN5g4PCAwBTwHhw3V1JpVlcCGK61iKmQq49ZDN0P/2optvr04xyGGNAl82SiKkOBBMwe4YYlgdB04t89/1O/w1cDnyilFU="
 
-PAGE_TEMPLATE = """
-<!DOCTYPE html>
-<html lang="th">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>แดชบอร์ดระบบยืม-คืนอุปกรณ์</title>
-</head>
-<body>
-<p>placeholder</p>
-</body>
-</html>
-"""
+
+# ตัวดักสิทธิ์: ถ้ายังไม่ล็อกอิน ห้ามเรียกใช้ API เจ้าหน้าที่
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get("is_admin"):
+            return jsonify({"message": "Unauthorized: กรุณาเข้าสู่ระบบก่อนใช้งาน"}), 401
+        return f(*args, **kwargs)
+    return decorated_function
 
 
 def ensure_db():
@@ -48,96 +43,283 @@ def ensure_db():
         conn.close()
 
 
+# -------------------------------------------------------------
+# 1. หน้าแสดงผล HTML
+# -------------------------------------------------------------
+# -------------------------------------------------------------
+# 1. หน้าแสดงผล HTML
+# -------------------------------------------------------------
+
+# 1) กำหนดให้หน้าแรกสุดเมื่อเปิดเว็บ (http://127.0.0.1:5000/) เป็นหน้าเลือก/จองกล้อง
 @app.route("/")
-def index():
+@app.route("/booking.html")
+@app.route("/booking")
+def booking_page():
+    return render_template("booking.html")
+
+
+# 2) หน้าแดชบอร์ดเจ้าหน้าที่ (ย้ายไปที่ /admin หรือ /index.html ต้องใส่รหัสผ่าน)
+@app.route("/admin", methods=["GET", "POST"])
+@app.route("/index.html", methods=["GET", "POST"])
+def index_page():
+    if request.method == "POST":
+        pwd = request.form.get("password", "").strip()
+        if pwd == ADMIN_PASSWORD:
+            session["is_admin"] = True
+            return redirect(url_for("index_page"))
+        else:
+            flash("รหัสผ่านไม่ถูกต้อง!")
+
+    if session.get("is_admin"):
+        return render_template("index.html")
+
+    login_template = """
+    <!DOCTYPE html>
+    <html lang="th">
+    <head>
+      <meta charset="UTF-8">
+      <title>เข้าสู่ระบบเจ้าหน้าที่ | ยืมคืนกล้อง</title>
+      <link rel="stylesheet" href="/static/style.css">
+      <style>
+        body { display: grid; place-items: center; min-height: 100vh; background: #f5f6fa; font-family: sans-serif; }
+        .login-box { background: #fff; padding: 36px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); width: 100%; max-width: 380px; text-align: center; }
+        .login-box h2 { margin-bottom: 8px; color: #1b2a5e; }
+        .login-box p { color: #5d6585; font-size: 14px; margin-bottom: 24px; }
+        .login-box input { width: 100%; padding: 12px 14px; border: 1px solid #dfe3ee; border-radius: 10px; margin-bottom: 16px; font-size: 15px; box-sizing: border-box; }
+        .login-box input:focus { outline: none; border-color: #1b2a5e; }
+        .alert { background: #fde2e0; color: #b3261e; padding: 10px; border-radius: 8px; font-size: 14px; margin-bottom: 16px; }
+      </style>
+    </head>
+    <body>
+      <div class="login-box">
+        <h2>🔒 เข้าสู่ระบบเจ้าหน้าที่</h2>
+        <p>ยืมคืนกล้อง — สำหรับเจ้าหน้าที่ดูแลระบบ</p>
+        {% with messages = get_flashed_messages() %}
+          {% if messages %}
+            <div class="alert">{{ messages[0] }}</div>
+          {% endif %}
+        {% endwith %}
+        <form method="POST">
+          <input type="password" name="password" placeholder="กรอกรหัสผ่านเจ้าหน้าที่" required autofocus>
+          <button type="submit" class="btn btn-amber btn-block">เข้าสู่ระบบ</button>
+        </form>
+      </div>
+    </body>
+    </html>
+    """
+    return render_template_string(login_template)
+
+
+@app.route("/logout")
+def logout():
+    session.pop("is_admin", None)
+    return redirect(url_for("index_page"))
+
+
+
+
+
+@app.route("/history.html")
+@app.route("/history")
+def history_page():
+    return render_template("history.html")
+
+
+@app.route('/line-mapping', methods=['GET'])
+def line_mapping():
+    return render_template("line_mapping.html")
+
+
+# -------------------------------------------------------------
+# 2. REST API Endpoints ( JSON )
+# -------------------------------------------------------------
+
+# API ดึงรายการประวัติยืม-คืนทั้งหมด (สำหรับหน้าแดชบอร์ดเจ้าหน้าที่)
+@app.route("/api/records", methods=["GET"])
+@admin_required
+def api_records():
     ensure_db()
     conn = get_connection()
-    rows = conn.execute(
-        """
-        SELECT br.record_id, br.due_date, br.return_date, br.fine_amount, br.notified,
-               u.full_name, e.equipment_name
+    rows = conn.execute("""
+        SELECT br.record_id, br.borrow_date, br.due_date, br.return_date, 
+               br.fine_amount, br.notified, br.user_id,
+               u.full_name, u.student_id, e.equipment_name
         FROM borrow_records br
         JOIN users u ON u.user_id = br.user_id
         JOIN equipment e ON e.equipment_id = br.equipment_id
-        ORDER BY br.record_id
-        """
-    ).fetchall()
-
+        ORDER BY br.record_id DESC
+    """).fetchall()
+    
     records = []
     for r in rows:
         d = dict(r)
-        d["is_overdue"] = (d["return_date"] is None) and (d["fine_amount"] > 0 or False)
-        records.append(d)
-
-    for d in records:
         if d["return_date"] is None:
-            result = calculate_fine(d["due_date"])
-            d["is_overdue"] = result["is_overdue"]
-
-    overdue_count = sum(1 for r in records if r["is_overdue"] and not r["return_date"])
-    total_fine = sum(r["fine_amount"] for r in records)
+            res = calculate_fine(d["due_date"])
+            d["is_overdue"] = res["is_overdue"]
+            d["fine_amount"] = res["fine_amount"]
+        else:
+            d["is_overdue"] = False
+        records.append(d)
     conn.close()
-
-    return render_template_string(
-        PAGE_TEMPLATE,
-        records=records,
-        overdue_count=overdue_count,
-        total_fine=total_fine,
-        total_records=len(records),
-        rate=DEFAULT_FINE_RATE_PER_DAY,
-    )
+    return jsonify({"records": records}), 200
 
 
-@app.route("/check", methods=["POST"])
-def run_check():
+# API รับคืนอุปกรณ์
+@app.route("/api/return/<int:record_id>", methods=["POST"])
+@admin_required
+def api_return(record_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT due_date FROM borrow_records WHERE record_id = ?', (record_id,))
+    record = cursor.fetchone()
+    if not record:
+        conn.close()
+        return jsonify({"message": "ไม่พบรายการยืมนี้"}), 404
+
+    current_date_str = date.today().isoformat()
+    result = calculate_fine(due_date=record['due_date'], return_date=current_date_str)
+    fine_amount = result["fine_amount"]
+
+    cursor.execute('''
+        UPDATE borrow_records 
+        SET return_date = ?, fine_amount = ?
+        WHERE record_id = ?
+    ''', (current_date_str, fine_amount, record_id))
+    conn.commit()
+    conn.close()
+    return jsonify({
+        "message": "รับคืนอุปกรณ์สำเร็จ",
+        "fine_amount": fine_amount,
+        "days_late": result.get("days_late", 0)
+    }), 200
+
+
+# API ตรวจสอบค่าปรับและส่ง LINE แจ้งเตือน
+@app.route("/api/check", methods=["POST"])
+@admin_required
+def api_check():
     ensure_db()
     conn = get_connection()
     overdue_list = check_and_update_fines(conn, rate_per_day=DEFAULT_FINE_RATE_PER_DAY)
-
     line_token = os.environ.get("LINE_CHANNEL_TOKEN") or LINE_CHANNEL_TOKEN
     notifier = LineNotifier(channel_access_token=line_token, dry_run=not bool(line_token))
+    
     sent = 0
     for item in overdue_list:
-        message = notifier.build_overdue_message(
-            full_name=item["full_name"],
-            equipment_name=item["equipment_name"],
-            due_date=item["due_date"],
-            days_late=item["days_late"],
-            fine_amount=item["fine_amount"],
-        )
-        result = notifier.send(item["line_user_id"], message)
-        if result.success:
-            mark_as_notified(conn, item["record_id"])
-            sent += 1
+        if item.get("line_user_id"):
+            msg = notifier.build_overdue_message(
+                full_name=item["full_name"],
+                equipment_name=item["equipment_name"],
+                due_date=item["due_date"],
+                days_late=item["days_late"],
+                fine_amount=item["fine_amount"],
+            )
+            res = notifier.send(item["line_user_id"], msg)
+            if res.success:
+                mark_as_notified(conn, item["record_id"])
+                sent += 1
     conn.close()
+    return jsonify({"overdue_count": len(overdue_list), "notified_count": sent}), 200
 
-    flash(f"ตรวจสอบเสร็จสิ้น: พบรายการเลยกำหนด {len(overdue_list)} รายการ ส่งแจ้งเตือนสำเร็จ {sent} รายการ")
-    return redirect(url_for("index"))
 
-from flask import request, jsonify
-from db_setup import get_connection  # เรียกใช้ฟังก์ชันเชื่อมต่อฐานข้อมูลจากไฟล์ db_setup.py
+# API รับการจองจากหน้า booking.html (รองรับทั้งรหัสนักศึกษาและ user_id)
+@app.route("/api/book", methods=["POST"])
+def api_book():
+    data = request.get_json() or {}
+    user_input = str(data.get("user_id", "")).strip()
+    equipment_id = data.get("equipment_id")
+    borrow_date = data.get("start_date")
+    due_date = data.get("end_date")
 
-# 1. API สำหรับผูกบัญชี LINE
+    if not user_input or not equipment_id or not borrow_date or not due_date:
+        return jsonify({"message": "กรุณากรอกข้อมูลให้ครบถ้วน"}), 400
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    try:
+        user = cursor.execute("""
+            SELECT user_id FROM users 
+            WHERE student_id = ? OR user_id = ?
+        """, (user_input, user_input)).fetchone()
+
+        if user:
+            internal_user_id = user["user_id"]
+        else:
+            cursor.execute("""
+                INSERT INTO users (full_name, student_id, role)
+                VALUES (?, ?, 'student')
+            """, (f"นักศึกษา ({user_input})", user_input))
+            conn.commit()
+            internal_user_id = cursor.lastrowid
+
+        eligibility = check_eligibility(conn, internal_user_id)
+        if not eligibility["eligible"]:
+            conn.close()
+            return jsonify({"message": "ไม่สามารถยืมอุปกรณ์ได้", "reasons": eligibility["reasons"]}), 400
+
+        cursor.execute('''
+            SELECT * FROM borrow_records 
+            WHERE equipment_id = ? 
+            AND return_date IS NULL
+            AND (borrow_date <= ? AND due_date >= ?)
+        ''', (equipment_id, due_date, borrow_date))
+        
+        if cursor.fetchone():
+            conn.close()
+            return jsonify({"message": "อุปกรณ์นี้ถูกยืมหรือจองในช่วงเวลาดังกล่าวแล้ว"}), 400
+
+        cursor.execute('''
+            INSERT INTO borrow_records (user_id, equipment_id, borrow_date, due_date, return_date, fine_amount, fine_paid, notified)
+            VALUES (?, ?, ?, ?, NULL, 0.0, 0, 0)
+        ''', (internal_user_id, equipment_id, borrow_date, due_date))
+        
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "บันทึกการจองสำเร็จ"}), 200
+
+    except Exception as e:
+        conn.close()
+        print(f"Booking Error: {e}")
+        return jsonify({"message": f"เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์: {str(e)}"}), 500
+
+
+# API ส่งรายชื่ออุปกรณ์ยืม-คืนกล้อง ให้ตรงกับรูปถ่ายและชื่อจริง
+@app.route("/api/equipment", methods=["GET"])
+def api_equipment():
+    equipment_list = [
+        {"equipment_id": 1, "equipment_name": "กล้อง Canon EOS R50", "category": "camera", "status": "available"},
+        {"equipment_id": 2, "equipment_name": "ขาตั้งกล้อง Fancier", "category": "tripod", "status": "available"},
+        {"equipment_id": 3, "equipment_name": "กล้องภาพนิ่ง Nikon D3300", "category": "camera", "status": "available"},
+        {"equipment_id": 4, "equipment_name": "กล้องภาพนิ่ง Canon EOS 700D", "category": "camera", "status": "available"},
+        {"equipment_id": 5, "equipment_name": "กล้องดิจิตอลวิดีโอ Panasonic HC-V700", "category": "video", "status": "available"},
+        {"equipment_id": 6, "equipment_name": "ขาตั้งกล้อง Sony", "category": "tripod", "status": "available"}
+    ]
+    return jsonify({"equipment": equipment_list}), 200
+
+
+# -------------------------------------------------------------
+# 3. LINE Bot & Integration APIs
+# -------------------------------------------------------------
+
 @app.route('/line/link', methods=['POST'])
 def line_link():
     data = request.get_json()
     if not data:
         return jsonify({"success": False, "message": "Invalid or missing JSON body"}), 400
         
-    user_id = data.get('user_id')         # รหัสประจำตัวนักศึกษา (เช่น '6412345001')
-    line_user_id = data.get('line_user_id') # LINE userId (เช่น 'Uxxxxxxxxxxxx')
+    user_id = data.get('user_id')
+    line_user_id = data.get('line_user_id')
     
     if not user_id or not line_user_id:
         return jsonify({"success": False, "message": "Missing user_id or line_user_id"}), 400
         
     conn = get_connection()
     try:
-        # เช็กว่ามีรหัสผู้ใช้นี้อยู่ในตาราง users หรือไม่ (เทียบกับ student_id)
         user = conn.execute("SELECT * FROM users WHERE student_id = ?", (user_id,)).fetchone()
         if not user:
             return jsonify({"success": False, "message": "ไม่พบรหัสผู้ใช้ในระบบ"}), 400
             
-        # เช็กว่า line_user_id นี้ถูกผูกกับคนอื่นไปแล้วหรือยัง
         existing_line = conn.execute(
             "SELECT * FROM users WHERE line_user_id = ? AND student_id != ?", 
             (line_user_id, user_id)
@@ -146,13 +328,11 @@ def line_link():
         if existing_line:
             return jsonify({"success": False, "message": "LINE บัญชีนี้ถูกเชื่อมต่อกับผู้ใช้อื่นแล้ว"}), 400
             
-        # บันทึก / อัปเดต line_user_id ลงในฐานข้อมูล
         conn.execute(
             "UPDATE users SET line_user_id = ? WHERE student_id = ?", 
             (line_user_id, user_id)
         )
         conn.commit()
-        
         return jsonify({"success": True, "message": "เชื่อมต่อ LINE สำเร็จ"}), 200
         
     except Exception as e:
@@ -161,196 +341,22 @@ def line_link():
         conn.close()
 
 
-# 2. API สำหรับตรวจสอบสถานะการผูก LINE
 @app.route('/line/status', methods=['GET'])
 def line_status():
-    user_id = request.args.get('user_id') # รับค่าผ่าน Query Parameter เช่น /line/status?user_id=6412345001
-    
+    user_id = request.args.get('user_id')
     if not user_id:
         return jsonify({"linked": False, "message": "Missing user_id parameter"}), 400
         
     conn = get_connection()
     try:
         user = conn.execute("SELECT line_user_id FROM users WHERE student_id = ?", (user_id,)).fetchone()
-        
-        # ถ้าพบข้อมูลและมี line_user_id บันทึกไว้แล้ว
         if user and user['line_user_id']:
-            return jsonify({
-                "linked": True,
-                "line_user_id": user['line_user_id']
-            }), 200
+            return jsonify({"linked": True, "line_user_id": user['line_user_id']}), 200
         else:
-            return jsonify({
-                "linked": False,
-                "line_user_id": None
-            }), 200
-            
+            return jsonify({"linked": False, "line_user_id": None}), 200
     finally:
         conn.close()
 
-
-# 3. API สำหรับรับ LINE userId (เชื่อมโยงกับหน้า /line-mapping)
-@app.route('/line-mapping', methods=['GET'])
-def line_mapping():
-    return render_template("line_mapping.html")
-
-
-@app.route('/book', methods=['GET', 'POST'])
-def handle_booking():
-    if request.method == 'POST':
-        # 1. ใช้ .get() เพื่อป้องกัน KeyError หากฟอร์มส่งข้อมูลมาไม่ครบ
-        user_id = request.form.get('user_id')
-        equipment_id = request.form.get('equipment_id')
-        borrow_date = request.form.get('start_date')
-        due_date = request.form.get('end_date')
-
-        # 2. ตรวจสอบว่ากรอกข้อมูลครบทุกช่องหรือไม่
-        if not user_id or not equipment_id or not borrow_date or not due_date:
-            return "❌ กรุณากรอกข้อมูลให้ครบถ้วน (รหัสผู้ใช้, อุปกรณ์, วันที่ยืม และกำหนดคืน)", 400
-
-        # 3. ตรวจสอบความถูกต้องของรูปแบบวันที่และตรรกะวันยืม-คืน
-        try:
-            b_date = datetime.strptime(borrow_date, '%Y-%m-%d').date()
-            d_date = datetime.strptime(due_date, '%Y-%m-%d').date()
-            if d_date < b_date:
-                return "❌ วันกำหนดคืน (Due Date) ต้องไม่มาก่อนวันที่ยืม (Borrow Date)", 400
-        except ValueError:
-            return "❌ รูปแบบวันที่ไม่ถูกต้อง (ต้องอยู่ในรูปแบบ YYYY-MM-DD)", 400
-
-        # 4. เชื่อมต่อฐานข้อมูลและตรวจสอบสิทธิ์ตามระบบเดิม
-        conn = get_connection()
-        cursor = conn.cursor()
-
-        eligibility = check_eligibility(conn, user_id)
-        if not eligibility["eligible"]:
-            conn.close()
-            reasons_text = " / ".join(eligibility["reasons"])
-            return f"❌ ขออภัย! ไม่สามารถยืมอุปกรณ์ใหม่ได้: {reasons_text}", 400
-
-        cursor.execute('''
-            SELECT * FROM borrow_records 
-            WHERE equipment_id = ? 
-            AND return_date IS NULL
-            AND (borrow_date <= ? AND due_date >= ?)
-        ''', (equipment_id, due_date, borrow_date))
-
-        existing = cursor.fetchone()
-
-        if existing:
-            conn.close()
-            return "❌ ขออภัย! อุปกรณ์ชิ้นนี้ถูกยืมหรือจองในช่วงเวลาดังกล่าวแล้ว", 400
-
-        cursor.execute('''
-            INSERT INTO borrow_records (user_id, equipment_id, borrow_date, due_date, return_date, fine_amount, fine_paid, notified)
-            VALUES (?, ?, ?, ?, NULL, 0.0, 0, 0)
-        ''', (user_id, equipment_id, borrow_date, due_date))
-
-        conn.commit()
-        conn.close()
-
-        return "✅ ตรวจสอบสิทธิ์ผ่านและจองอุปกรณ์สำเร็จเรียบร้อยแล้ว!", 200
-
-    return "🚧 หน้าฟอร์มจองกำลังพัฒนาโดย Front-end (หลังบ้านพร้อมรับข้อมูลแล้ว)"
-
-@app.route('/return/<int:record_id>', methods=['GET', 'POST'])
-def return_equipment(record_id):
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute('SELECT due_date FROM borrow_records WHERE record_id = ?', (record_id,))
-    record = cursor.fetchone()
-
-    if not record:
-        conn.close()
-        return "❌ ไม่พบรายการยืมนี้ในระบบ"
-
-    due_date_str = record['due_date']
-    current_date_str = date.today().isoformat()
-
-    result = calculate_fine(
-        due_date=due_date_str,
-        return_date=current_date_str,
-        rate_per_day=DEFAULT_FINE_RATE_PER_DAY,
-    )
-    fine_amount = result["fine_amount"]
-
-    cursor.execute('''
-        UPDATE borrow_records 
-        SET return_date = ?, fine_amount = ?
-        WHERE record_id = ?
-    ''', (current_date_str, fine_amount, record_id))
-
-    conn.commit()
-    conn.close()
-
-    return f"✅ บันทึกการคืนอุปกรณ์ (รายการที่ {record_id}) สำเร็จ! (ยอดค่าปรับ: {fine_amount} บาท)"
-
-@app.route("/history", methods=["GET"])
-def history():
-    student_id = request.args.get("user_id", "").strip()
-    records = []
-
-    if student_id:
-        conn = get_connection()
-
-        # หา user_id ภายในระบบจากรหัสนักศึกษา
-        user = conn.execute("""
-            SELECT user_id
-            FROM users
-            WHERE student_id = ?
-        """, (student_id,)).fetchone()
-
-        if user:
-            internal_user_id = user["user_id"]
-
-            rows = conn.execute("""
-                SELECT
-                    e.equipment_name,
-                    br.borrow_date AS start_date,
-                    br.due_date AS end_date,
-                    br.return_date,
-                    br.fine_amount AS fine
-                FROM borrow_records br
-                JOIN equipment e
-                    ON e.equipment_id = br.equipment_id
-                WHERE br.user_id = ?
-                ORDER BY br.record_id DESC
-            """, (internal_user_id,)).fetchall()
-
-            from datetime import datetime
-
-            today = datetime.now().date()
-
-            for r in rows:
-                d = dict(r)
-
-                # ตรวจสอบสถานะ
-                if d["return_date"]:
-                    d["status"] = "returned"
-
-                else:
-                    try:
-                        due_date = datetime.strptime(
-                            d["end_date"], "%Y-%m-%d"
-                        ).date()
-
-                        if due_date < today:
-                            d["status"] = "overdue"
-                        else:
-                            d["status"] = "borrowing"
-
-                    except (ValueError, TypeError):
-                        d["status"] = "borrowing"
-
-                records.append(d)
-
-        conn.close()
-
-    return render_template(
-        "history.html",
-        user_id=student_id,
-        records=records
-    )
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -369,15 +375,10 @@ def webhook():
     try:
         data = json.loads(body)
         events = data.get('events', [])
-
-        # 🔑 กำหนด LINE User ID ของเจ้าหน้าที่ (Admin) สำหรับทดสอบสั่งการผ่านแชท
         ADMIN_LINE_IDS = ["Ubd5423c296e823b727c730f0e844b271"]
 
         for event in events:
-            print(">>> LINE User ID ของคุณคือ:", event.get('source', {}).get('userId'), flush=True)
             event_type = event.get('type')
-
-            # --- กรณีที่ 1: ผู้ใช้กดเพิ่มเพื่อน (Follow) ---
             if event_type == 'follow':
                 line_user_id = event.get('source', {}).get('userId')
                 if line_user_id:
@@ -399,20 +400,17 @@ def webhook():
                         conn.commit()
                     conn.close()
 
-            # --- กรณีที่ 2: มีข้อความส่งเข้ามาในแชท (รองรับคำสั่งแอดมิน) ---
             elif event_type == 'message':
                 message = event.get('message', {})
                 if message.get('type') == 'text':
                     user_line_id = event.get('source', {}).get('userId')
                     text_command = message.get('text').strip()
 
-                    # ตรวจสอบสิทธิ์ว่าเป็นแอดมินหรือไม่
                     if user_line_id in ADMIN_LINE_IDS:
                         line_token = os.environ.get("LINE_CHANNEL_TOKEN") or LINE_CHANNEL_TOKEN
                         notifier = LineNotifier(channel_access_token=line_token, dry_run=not bool(line_token))
 
-                        # คำสั่งขอสรุปยอดด่วน
-                        if text_command == "สรุปยอด" or text_command == "/summary":
+                        if text_command in ["สรุปยอด", "/summary"]:
                             ensure_db()
                             conn = get_connection()
                             total_records = conn.execute("SELECT COUNT(*) FROM borrow_records").fetchone()[0]
@@ -427,7 +425,6 @@ def webhook():
                                 f"สถานะระบบ: ปกติ ✅"
                             )
                             notifier.send(user_line_id, reply_message)
-
 
     except Exception as e:
         print(f"Webhook Error: {e}")

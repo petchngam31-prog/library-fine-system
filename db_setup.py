@@ -1,132 +1,87 @@
-"""
-db_setup.py
-============
-สร้างฐานข้อมูลจำลอง (Mock Database) ด้วย SQLite สำหรับทดสอบระบบ
-ยืม-คืนอุปกรณ์ของคณะวิทยาการสื่อสาร โดยไม่ต้องเข้าถึงฐานข้อมูลจริง
-
-ตาราง:
-  - users            : ผู้ใช้งาน (นักศึกษา/เจ้าหน้าที่) พร้อม LINE user id สำหรับแจ้งเตือน
-  - equipment        : รายการอุปกรณ์ที่ให้ยืม
-  - borrow_records   : รายการยืม-คืน (วันที่ยืม, กำหนดคืน, วันที่คืนจริง, สถานะค่าปรับ)
-"""
-
+import os
 import sqlite3
-from datetime import date, timedelta
 
 DB_PATH = "library_mock.db"
 
-
-def get_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path)
-    conn.execute("PRAGMA foreign_keys = ON")
+def get_connection():
+    conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
+def init_mock_db():
+    conn = get_connection()
+    cursor = conn.cursor()
 
-def create_schema(conn: sqlite3.Connection) -> None:
-    cur = conn.cursor()
+    # ลบตารางเดิมและสร้างโครงสร้างตารางใหม่
+    cursor.execute("DROP TABLE IF EXISTS borrow_records")
+    cursor.execute("DROP TABLE IF EXISTS equipment")
+    cursor.execute("DROP TABLE IF EXISTS users")
 
-    cur.executescript(
-        """
-        DROP TABLE IF EXISTS borrow_records;
-        DROP TABLE IF EXISTS equipment;
-        DROP TABLE IF EXISTS users;
-
+    cursor.execute("""
         CREATE TABLE users (
             user_id      INTEGER PRIMARY KEY AUTOINCREMENT,
             full_name    TEXT NOT NULL,
             student_id   TEXT UNIQUE,
-            role         TEXT NOT NULL DEFAULT 'student',   -- student / staff
-            line_user_id TEXT                                -- LINE userId สำหรับส่ง push message
-        );
+            role         TEXT NOT NULL DEFAULT 'student',
+            line_user_id TEXT
+        )
+    """)
 
+    cursor.execute("""
         CREATE TABLE equipment (
             equipment_id   INTEGER PRIMARY KEY AUTOINCREMENT,
             equipment_name TEXT NOT NULL,
             category       TEXT,
-            status         TEXT NOT NULL DEFAULT 'available'  -- available / borrowed / maintenance
-        );
+            status         TEXT NOT NULL DEFAULT 'available'
+        )
+    """)
 
+    cursor.execute("""
         CREATE TABLE borrow_records (
             record_id     INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id       INTEGER NOT NULL,
             equipment_id  INTEGER NOT NULL,
-            borrow_date   TEXT NOT NULL,   -- ISO format YYYY-MM-DD
-            due_date      TEXT NOT NULL,   -- ISO format YYYY-MM-DD
-            return_date   TEXT,            -- NULL = ยังไม่คืน
+            borrow_date   TEXT NOT NULL,
+            due_date      TEXT NOT NULL,
+            return_date   TEXT,
             fine_amount   REAL NOT NULL DEFAULT 0,
-            fine_paid     INTEGER NOT NULL DEFAULT 0,  -- 0 = ยังไม่จ่าย, 1 = จ่ายแล้ว
-            notified      INTEGER NOT NULL DEFAULT 0,  -- 0 = ยังไม่แจ้งเตือน, 1 = แจ้งเตือนแล้ว
+            fine_paid     INTEGER NOT NULL DEFAULT 0,
+            notified      INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (user_id) REFERENCES users(user_id),
             FOREIGN KEY (equipment_id) REFERENCES equipment(equipment_id)
-        );
-        """
-    )
-    conn.commit()
+        )
+    """)
 
-
-def seed_data(conn: sqlite3.Connection) -> None:
-    cur = conn.cursor()
-    today = date.today()
-
-    # ผู้ใช้งานจำลอง (line_user_id เป็นค่าจำลอง ใช้ทดสอบ dry-run เท่านั้น)
-    users = [
-        ("สมชาย ใจดี", "6412345001", "student", "U-mock-somchai-0001"),
-        ("สมหญิง รักเรียน", "6412345002", "student", "U-mock-somying-0002"),
-        ("วิชัย ขยันยืม", "6412345003", "student", "U-mock-wichai-0003"),
-        ("เจ้าหน้าที่ ก", None, "staff", "U-mock-staff-0004"),
+    # 1. รายการอุปกรณ์ยืม-คืนกล้องจริง 6 รายการ
+    sample_equipment = [
+        (1, 'กล้อง Canon EOS R50', 'camera', 'available'),
+        (2, 'ขาตั้งกล้อง Fancier', 'tripod', 'available'),
+        (3, 'กล้องภาพนิ่ง Nikon D3300', 'camera', 'available'),
+        (4, 'กล้องภาพนิ่ง Canon EOS 700D', 'camera', 'available'),
+        (5, 'กล้องดิจิตอลวิดีโอ Panasonic HC-V700', 'video', 'available'),
+        (6, 'ขาตั้งกล้อง Sony', 'tripod', 'available')
     ]
-    cur.executemany(
-        "INSERT INTO users (full_name, student_id, role, line_user_id) VALUES (?, ?, ?, ?)",
-        users,
-    )
+    cursor.executemany("INSERT INTO equipment VALUES (?, ?, ?, ?)", sample_equipment)
 
-    equipment = [
-        ("กล้อง Canon EOS 90D", "camera"),
-        ("ขาตั้งกล้อง Manfrotto", "tripod"),
-        ("ไมโครโฟน Rode NTG3", "audio"),
-        ("โน้ตบุ๊ก MacBook Pro", "computer"),
-        ("ไฟส่องสว่าง LED Panel", "lighting"),
+    # 2. รายชื่อนักศึกษาที่เพิ่งลงระบบยืมจริง
+    sample_users = [
+        (1, 'นักศึกษา (6720610027)', '6720610027', 'student', None),
+        (2, 'นักศึกษา (6720610037)', '6720610037', 'student', None)
     ]
-    cur.executemany(
-        "INSERT INTO equipment (equipment_name, category) VALUES (?, ?)", equipment
-    )
+    cursor.executemany("INSERT INTO users VALUES (?, ?, ?, ?, ?)", sample_users)
 
-    # รายการยืม จำลองสถานการณ์หลายแบบ:
-    #  1) เกินกำหนดมาแล้วหลายวัน ยังไม่คืน  -> ต้องคำนวณค่าปรับ + แจ้งเตือน
-    #  2) เกินกำหนด 1 วัน ยังไม่คืน          -> ต้องคำนวณค่าปรับ + แจ้งเตือน
-    #  3) ยังไม่ถึงกำหนดคืน                   -> ไม่ต้องทำอะไร
-    #  4) คืนตรงเวลาแล้ว                      -> ไม่มีค่าปรับ
-    borrow_records = [
-        # (user_id, equipment_id, borrow_date, due_date, return_date)
-        (1, 1, str(today - timedelta(days=10)), str(today - timedelta(days=3)), None),
-        (2, 3, str(today - timedelta(days=6)), str(today - timedelta(days=1)), None),
-        (3, 4, str(today - timedelta(days=2)), str(today + timedelta(days=5)), None),
-        (1, 2, str(today - timedelta(days=8)), str(today - timedelta(days=5)),
-         str(today - timedelta(days=5))),
+    # 3. ข้อมูลรายการจองล่าสุดที่พึ่งลงระบบ
+    sample_records = [
+        (1, 1, 6, '2026-10-05', '2026-10-06', None, 0.0, 0, 0),  # 6720610027 ยืม ขาตั้งกล้อง Sony
+        (2, 1, 5, '2026-10-05', '2026-10-06', None, 0.0, 0, 0),  # 6720610027 ยืม กล้องดิจิตอลวิดีโอ Panasonic
+        (3, 2, 1, '2026-10-13', '2026-10-14', None, 0.0, 0, 0),  # 6720610037 ยืม กล้อง Canon EOS R50
+        (4, 2, 2, '2026-10-13', '2026-10-14', None, 0.0, 0, 0)   # 6720610037 ยืม ขาตั้งกล้อง Fancier
     ]
-    cur.executemany(
-        """INSERT INTO borrow_records
-           (user_id, equipment_id, borrow_date, due_date, return_date)
-           VALUES (?, ?, ?, ?, ?)""",
-        borrow_records,
-    )
+    cursor.executemany("INSERT INTO borrow_records VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", sample_records)
 
     conn.commit()
-
-
-def init_mock_db(db_path: str = DB_PATH) -> sqlite3.Connection:
-    """สร้างและเติมข้อมูลฐานข้อมูลจำลองใหม่ทั้งหมด (ใช้สำหรับรันทดสอบ/สาธิต)"""
-    conn = get_connection(db_path)
-    create_schema(conn)
-    seed_data(conn)
     return conn
 
-
 if __name__ == "__main__":
-    conn = init_mock_db()
-    print(f"สร้างฐานข้อมูลจำลองสำเร็จที่ '{DB_PATH}'")
-    print("ตาราง users:", [dict(r) for r in conn.execute("SELECT * FROM users")])
-    print("ตาราง equipment:", [dict(r) for r in conn.execute("SELECT * FROM equipment")])
-    print("ตาราง borrow_records:", [dict(r) for r in conn.execute("SELECT * FROM borrow_records")])
-    conn.close()
+    init_mock_db()
+    print("อัปเดตฐานข้อมูลเฉพาะรายการจริงเรียบร้อยแล้ว!")

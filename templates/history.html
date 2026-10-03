@@ -6,79 +6,96 @@
   <title>ประวัติการยืม | ยืมคืนกล้อง</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 
 <header class="topbar">
-  <a class="brand" href="/booking"><span class="brand-logo"></span>ยืมคืนกล้อง</a>
+  <a class="brand" href="/"><span class="brand-logo"></span>ยืมคืนกล้อง</a>
   <nav class="nav">
-    <a href="/booking">จองอุปกรณ์</a>
-    <a class="active" href="/history">ประวัติการยืม</a>
-    <a href="/">แดชบอร์ดเจ้าหน้าที่</a>
+    <a href="/">จองอุปกรณ์</a>
+    <a class="active" href="/history.html">ประวัติการยืม</a>
+    <a href="/admin">แดชบอร์ดเจ้าหน้าที่</a>
   </nav>
 </header>
 
 <main class="container">
   <h1>ประวัติการยืมของฉัน</h1>
 
-  <!-- ค้นหาด้วยรหัสผู้ยืม → GET /history?user_id=xxx -->
-  <form class="search-bar" method="GET" action="/history">
-    <input type="text" name="user_id" value="{{ user_id or '' }}" placeholder="กรอกรหัสผู้ยืม เช่น 6612345678" required aria-label="รหัสผู้ยืม">
+  <form class="search-bar" id="searchForm">
+    <input type="text" id="userId" placeholder="กรอกรหัสผู้ยืม หรือ รหัสนักศึกษา" required aria-label="รหัสผู้ยืม">
     <button type="submit" class="btn btn-amber">ดูประวัติ</button>
   </form>
 
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-    <div class="flash-area">
-      {% for category, message in messages %}
-        <div class="flash {{ category }}">{{ '✅' if category == 'success' else '❌' }} {{ message }}</div>
-      {% endfor %}
-    </div>
-    {% endif %}
-  {% endwith %}
+  <div class="flash-area" id="flash-area"></div>
+  <p class="hint" id="hint">กรอกรหัสผู้ยืมด้านบน เพื่อดูประวัติการยืม-คืนและค่าปรับของคุณ</p>
 
-  {% if user_id %}
-    {% set rows = records if records is defined else [] %}
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>อุปกรณ์</th>
-            <th>วันที่ยืม</th>
-            <th>กำหนดคืน</th>
-            <th>วันที่คืน</th>
-            <th class="num">ค่าปรับ</th>
-            <th>สถานะ</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for r in rows %}
-          {% if r.status in ['returned', 'คืนแล้ว'] %}
-            {% set cls, label = 'returned', 'คืนแล้ว' %}
-          {% elif r.status in ['overdue', 'เลยกำหนด'] %}
-            {% set cls, label = 'overdue', 'เลยกำหนด' %}
-          {% else %}
-            {% set cls, label = 'borrowing', 'กำลังยืม' %}
-          {% endif %}
-          <tr>
-            <td>{{ r.equipment_name }}</td>
-            <td>{{ r.start_date }}</td>
-            <td>{{ r.end_date }}</td>
-            <td>{{ r.return_date or '-' }}</td>
-            <td class="num {{ 'fine-due' if r.fine and r.fine > 0 }}">{{ r.fine or 0 }}</td>
-            <td><span class="badge {{ cls }}">{{ label }}</span></td>
-          </tr>
-          {% else %}
-          <tr><td class="empty-row" colspan="6">ไม่พบประวัติการยืมของรหัส {{ user_id }}</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  {% else %}
-    <p class="hint">กรอกรหัสผู้ยืมด้านบน เพื่อดูประวัติการยืม-คืนและค่าปรับของคุณ</p>
-  {% endif %}
+  <div class="table-wrap" id="tableWrap" hidden>
+    <table>
+      <thead>
+        <tr><th>อุปกรณ์</th><th>วันที่ยืม</th><th>กำหนดคืน</th><th>วันที่คืน</th><th class="num">ค่าปรับ</th><th>สถานะ</th></tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
 </main>
 
+<script src="/static/config.js"></script>
+<script src="/static/app.js"></script>
+<script>
+  document.querySelector("#searchForm")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const q = document.querySelector("#userId").value.trim();
+    const flashArea = document.querySelector("#flash-area");
+    if (flashArea) flashArea.innerHTML = "";
+
+    try {
+      const res = await api("/api/records");
+      if (!res || !res.ok) {
+        if (typeof showMessage === "function") showMessage("error", (res && res.data && res.data.message) || "โหลดประวัติไม่สำเร็จ");
+        return;
+      }
+
+      // กรองเฉพาะประวัติที่เป็นของรหัสผู้ยืม หรือ รหัสนักศึกษานี้
+      const mine = (res.data.records || [])
+        .filter((r) => 
+          String(r.student_id || "").trim() === q || 
+          String(r.user_id || "").trim() === q
+        )
+        .sort((a, b) => b.record_id - a.record_id);
+
+      const hintEl = document.querySelector("#hint");
+      const tableWrapEl = document.querySelector("#tableWrap");
+      const tbodyEl = document.querySelector("#tbody");
+
+      if (hintEl) hintEl.hidden = true;
+      if (tableWrapEl) tableWrapEl.hidden = false;
+
+      if (tbodyEl) {
+        tbodyEl.innerHTML = mine.length
+          ? mine.map((r) => {
+              const st = typeof statusOf === "function" ? statusOf(r) : { cls: "borrowing", label: "กำลังยืม" };
+              const fine = Number(r.fine_amount || 0);
+              const fDate = typeof fmtDate === "function" ? fmtDate : (d) => d || "-";
+              const fMoney = typeof money === "function" ? money : (m) => m;
+              const eqName = typeof esc === "function" ? esc(r.equipment_name) : r.equipment_name;
+
+              return `<tr>
+                <td>${eqName}</td>
+                <td>${fDate(r.borrow_date)}</td>
+                <td>${fDate(r.due_date)}</td>
+                <td>${fDate(r.return_date)}</td>
+                <td class="num ${fine > 0 ? "fine-due" : ""}">${fMoney(fine)}</td>
+                <td><span class="badge ${st.cls}">${st.label}</span></td>
+              </tr>`;
+            }).join("")
+          : `<tr><td class="empty-row" colspan="6">ไม่พบประวัติการยืมของรหัส ${typeof esc === "function" ? esc(q) : q}</td></tr>`;
+      }
+    } catch (err) {
+      console.error(err);
+      alert("เกิดข้อผิดพลาดในการโหลดประวัติ");
+    }
+  });
+</script>
 </body>
 </html>

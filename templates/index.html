@@ -6,121 +6,172 @@
   <title>แดชบอร์ดเจ้าหน้าที่ | ยืมคืนกล้อง</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 
 <header class="topbar">
   <a class="brand" href="/"><span class="brand-logo"></span>ยืมคืนกล้อง</a>
   <nav class="nav">
-    <a href="/booking">จองอุปกรณ์</a>
-    <a href="/history">ประวัติการยืม</a>
-    <a class="active" href="/">แดชบอร์ดเจ้าหน้าที่</a>
+    <a href="/">จองอุปกรณ์</a>
+    <a href="/history.html">ประวัติการยืม</a>
+    <a class="active" href="/admin">แดชบอร์ดเจ้าหน้าที่</a>
+    <a href="/logout" style="color: #e74c3c; font-weight: bold; margin-left: 10px;">🚪 ออกจากระบบ</a>
   </nav>
 </header>
 
 <main class="container">
-
   <div class="toolbar">
     <h1>รายการยืม-คืนอุปกรณ์</h1>
-
-    <!-- ปุ่มตรวจสอบค่าปรับ → POST /check -->
-    <form method="POST" action="/check" id="checkForm">
-      <button type="submit" class="btn btn-amber" id="checkBtn">ตรวจสอบค่าปรับและแจ้งเตือน LINE</button>
-    </form>
+    <button type="button" class="btn btn-amber" id="checkBtn">ตรวจสอบค่าปรับและแจ้งเตือน LINE</button>
   </div>
 
-  <!-- Flash message จาก Backend -->
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-    <div class="flash-area">
-      {% for category, message in messages %}
-        <div class="flash {{ category }}">{{ '✅' if category == 'success' else '❌' }} {{ message }}</div>
-      {% endfor %}
-    </div>
-    {% endif %}
-  {% endwith %}
+  <div class="flash-area" id="flash-area"></div>
 
-  <!-- ถ้า Backend ยังไม่ส่ง records มา จะใช้ข้อมูลตัวอย่างแทน (ลบทิ้งได้เมื่อเชื่อมจริง) -->
-  {% set rows = records if records is defined else [
-    {'id': 1, 'user_id': '001', 'equipment_name': 'กล้อง', 'start_date': '1/10', 'end_date': '5/10', 'return_date': None, 'fine': 100, 'status': 'overdue'},
-    {'id': 2, 'user_id': '002', 'equipment_name': 'ขาตั้ง', 'start_date': '2/10', 'end_date': '6/10', 'return_date': '6/10', 'fine': 0, 'status': 'returned'},
-    {'id': 3, 'user_id': '003', 'equipment_name': 'กล้อง', 'start_date': '3/10', 'end_date': '8/10', 'return_date': None, 'fine': 0, 'status': 'borrowing'}
-  ] %}
-
-  {% if records is not defined %}
-    <div class="flash-area">
-      <div class="flash warning">⚠️ กำลังแสดงข้อมูลตัวอย่าง: Backend ยังไม่ได้ส่งตัวแปร records เข้ามาที่หน้านี้ (ข้อมูลจริงจึงไม่อัปเดต)</div>
-    </div>
-  {% endif %}
+  <div class="stats" id="stats" hidden>
+    <div class="stat"><span class="stat-num" id="statTotal">0</span><span class="stat-label">รายการทั้งหมด</span></div>
+    <div class="stat"><span class="stat-num" id="statOverdue">0</span><span class="stat-label">เลยกำหนด</span></div>
+    <div class="stat"><span class="stat-num" id="statFine">0</span><span class="stat-label">ค่าปรับสะสม (บาท)</span></div>
+  </div>
 
   <div class="table-wrap">
     <table>
       <thead>
         <tr>
-          <th>ผู้ยืม</th>
-          <th>อุปกรณ์</th>
-          <th>วันที่ยืม</th>
-          <th>กำหนดคืน</th>
-          <th>วันที่คืน</th>
-          <th class="num">ค่าปรับ</th>
-          <th>สถานะ</th>
-          <th>การทำงาน</th>
+          <th>ผู้ยืม</th><th>อุปกรณ์</th><th>วันที่ยืม</th><th>กำหนดคืน</th>
+          <th>วันที่คืน</th><th class="num">ค่าปรับ</th><th>สถานะ</th><th>การทำงาน</th>
         </tr>
       </thead>
-      <tbody>
-        {% for r in rows %}
-        {# แปลงค่า status จาก Backend เป็นสี/ข้อความ — แก้รายการได้ตามที่เพื่อนส่งมา #}
-        {% if r.status in ['returned', 'คืนแล้ว'] %}
-          {% set cls, label = 'returned', 'คืนแล้ว' %}
-        {% elif r.status in ['overdue', 'เลยกำหนด'] %}
-          {% set cls, label = 'overdue', 'เลยกำหนด' %}
-        {% else %}
-          {% set cls, label = 'borrowing', 'กำลังยืม' %}
-        {% endif %}
-        <tr>
-          <td>{{ r.user_id }}</td>
-          <td>{{ r.equipment_name }}</td>
-          <td>{{ r.start_date }}</td>
-          <td>{{ r.end_date }}</td>
-          <td>{{ r.return_date or '-' }}</td>
-          <td class="num {{ 'fine-due' if r.fine and r.fine > 0 }}">{{ r.fine or 0 }}</td>
-          <td><span class="badge {{ cls }}">{{ label }}</span></td>
-          <td>
-            {% if cls == 'returned' %}
-              -
-            {% else %}
-              <!-- ปุ่มรับคืน → /return/<record_id> -->
-              <a class="btn btn-sm" href="/return/{{ r.id }}">รับคืน</a>
-            {% endif %}
-          </td>
-        </tr>
-        {% else %}
-        <tr><td class="empty-row" colspan="8">ยังไม่มีรายการยืม-คืน</td></tr>
-        {% endfor %}
-      </tbody>
+      <tbody id="tbody"><tr><td class="loading" colspan="8">กำลังโหลดข้อมูล...</td></tr></tbody>
     </table>
   </div>
 </main>
 
+<script src="/static/config.js"></script>
+<script src="/static/app.js"></script>
 <script>
-  // ปุ่มตรวจสอบค่าปรับ: แสดงสถานะกำลังทำงาน กันกดซ้ำ
-  document.getElementById('checkForm').addEventListener('submit', function () {
-    const b = document.getElementById('checkBtn');
-    b.disabled = true;
-    b.textContent = 'กำลังตรวจสอบ...';
+  // วาดตารางข้อมูลการยืม-คืน
+  function render(records) {
+    const rows = [...records].sort((a, b) => b.record_id - a.record_id);
+    const tbody = document.querySelector("#tbody");
+
+    if (tbody) {
+      tbody.innerHTML = rows.length
+        ? rows.map((r) => {
+            const st = typeof statusOf === "function" ? statusOf(r) : { cls: "borrowing", label: "กำลังยืม" };
+            const fine = Number(r.fine_amount || 0);
+            const name = typeof esc === "function" ? esc(r.full_name) : r.full_name;
+            const eqName = typeof esc === "function" ? esc(r.equipment_name) : r.equipment_name;
+            const fDate = typeof fmtDate === "function" ? fmtDate : (d) => d || "-";
+            const fMoney = typeof money === "function" ? money : (m) => m;
+
+            return `
+            <tr>
+              <td>${name}${r.student_id ? `<span class="sub">${r.student_id}</span>` : ""}</td>
+              <td>${eqName}</td>
+              <td>${fDate(r.borrow_date)}</td>
+              <td>${fDate(r.due_date)}</td>
+              <td>${fDate(r.return_date)}</td>
+              <td class="num ${fine > 0 ? "fine-due" : ""}">${fMoney(fine)}</td>
+              <td><span class="badge ${st.cls}">${st.label}</span>${r.notified && st.cls !== "returned" ? '<span class="sub">แจ้ง LINE แล้ว</span>' : ""}</td>
+              <td>${st.cls === "returned" ? "-" : `<button type="button" class="btn btn-sm btn-return" data-id="${r.record_id}">รับคืน</button>`}</td>
+            </tr>`;
+          }).join("")
+        : '<tr><td class="empty-row" colspan="8">ยังไม่มีรายการยืม-คืนในระบบ</td></tr>';
+    }
+
+    const overdue = rows.filter((r) => !r.return_date && r.is_overdue).length;
+    if (document.querySelector("#statTotal")) document.querySelector("#statTotal").textContent = rows.length;
+    if (document.querySelector("#statOverdue")) {
+      const el = document.querySelector("#statOverdue");
+      el.textContent = overdue;
+      el.classList.toggle("fine-due", overdue > 0);
+    }
+    if (document.querySelector("#statFine")) {
+      const totalFine = rows.reduce((s, r) => s + Number(r.fine_amount || 0), 0);
+      document.querySelector("#statFine").textContent = typeof money === "function" ? money(totalFine) : totalFine;
+    }
+    if (document.querySelector("#stats")) document.querySelector("#stats").hidden = false;
+  }
+
+  // โหลดรายการประวัติการยืมจาก API Backend
+  async function loadRecords() {
+    try {
+      const res = await fetch("/api/records", { headers: { "Accept": "application/json" } });
+      
+      if (res.status === 401) {
+        // ถ้า Session หลุดหรือไม่ได้รับสิทธิ์ ให้ส่งกลับไปหน้าล็อกอิน
+        window.location.href = "/admin";
+        return;
+      }
+
+      const data = await res.json();
+      if (res.ok) {
+        render(data.records || []);
+      } else {
+        document.querySelector("#tbody").innerHTML = '<tr><td class="empty-row" colspan="8">โหลดข้อมูลไม่สำเร็จ</td></tr>';
+      }
+    } catch (e) {
+      console.error(e);
+      document.querySelector("#tbody").innerHTML = '<tr><td class="empty-row" colspan="8">เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์</td></tr>';
+    }
+  }
+
+  // ปุ่ม "รับคืน"
+  document.querySelector("#tbody")?.addEventListener("click", async (e) => {
+    const btn = e.target.closest(".btn-return");
+    if (!btn) return;
+    if (!confirm("ยืนยันการรับคืนอุปกรณ์รายการนี้?")) return;
+
+    btn.disabled = true;
+    btn.textContent = "กำลังบันทึก...";
+    
+    try {
+      const res = await fetch(`/api/return/${btn.dataset.id}`, { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        const fine = Number(data.fine_amount || 0);
+        if (typeof showMessage === "function") {
+          showMessage("success", data.message + (fine > 0 ? ` — เลยกำหนด ${data.days_late} วัน ค่าปรับ ${money(fine)} บาท` : ""), { clear: true });
+        }
+      } else {
+        if (typeof showMessage === "function") showMessage("error", data.message || "รับคืนไม่สำเร็จ", { clear: true });
+      }
+    } catch (err) {
+      alert("เกิดข้อผิดพลาดในการรับคืน");
+    }
+    loadRecords();
   });
 
-  // ปุ่มรับคืน: ถามยืนยันก่อน
-  document.querySelectorAll('a[href^="/return/"]').forEach(function (a) {
-    a.addEventListener('click', function (e) {
-      if (!confirm('ยืนยันการรับคืนอุปกรณ์รายการนี้?')) e.preventDefault();
-    });
+  // ปุ่ม "ตรวจสอบค่าปรับและแจ้งเตือน LINE"
+  document.querySelector("#checkBtn")?.addEventListener("click", async () => {
+    const btn = document.querySelector("#checkBtn");
+    btn.disabled = true;
+    btn.textContent = "กำลังตรวจสอบ...";
+    
+    try {
+      const res = await fetch("/api/check", { method: "POST" });
+      const data = await res.json();
+      btn.disabled = false;
+      btn.textContent = "ตรวจสอบค่าปรับและแจ้งเตือน LINE";
+
+      if (!res.ok) {
+        if (typeof showMessage === "function") showMessage("error", data.message || "ตรวจสอบไม่สำเร็จ", { clear: true });
+        return;
+      }
+      const { overdue_count, notified_count } = data;
+      if (typeof showMessage === "function") {
+        showMessage("success", `ตรวจสอบค่าปรับสำเร็จ — พบรายการเลยกำหนด ${overdue_count} รายการ แจ้งเตือน LINE สำเร็จ ${notified_count} รายการ`, { clear: true });
+      }
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = "ตรวจสอบค่าปรับและแจ้งเตือน LINE";
+      alert("เกิดข้อผิดพลาดในการตรวจสอบ");
+    }
+    loadRecords();
   });
 
-  // เลื่อนไปที่ข้อความแจ้งผลจาก Backend
-  const flashArea = document.querySelector('.flash-area');
-  if (flashArea) flashArea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  loadRecords();
 </script>
 </body>
 </html>
