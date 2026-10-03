@@ -14,6 +14,7 @@
   <a class="brand" href="/booking"><span class="brand-logo"></span>ยืมคืนกล้อง</a>
   <nav class="nav">
     <a class="active" href="/booking">จองอุปกรณ์</a>
+    <a href="/history">ประวัติการยืม</a>
     <a href="/">แดชบอร์ดเจ้าหน้าที่</a>
   </nav>
 </header>
@@ -47,6 +48,13 @@
     {'id': 6, 'name': 'ขาตั้งกล้อง Fancier', 'desc': 'ขาตั้งกล้อง หัวบอล', 'category': 'tripod', 'available': 10}
   ] %}
 
+  <!-- รูปอุปกรณ์: ไฟล์อยู่ที่ static/images/ (ถ้า Backend ส่ง e.image มา จะใช้ค่านั้นก่อน) -->
+  {% set images = {1: 'canon.jpeg', 2: 'nikon.jpeg', 3: 'sony_tripod.jpeg', 4: 'canon_700d.jpeg', 5: 'panasonic.jpeg', 6: 'fancier.jpeg'} %}
+
+  <!-- ลิงก์เพิ่มเพื่อน LINE: เปลี่ยน @YOUR_LINE_ID เป็น LINE ID ของบัญชี Official Account
+       (หรือให้ Backend ส่งตัวแปร line_oa_url เข้ามาก็ได้) -->
+  {% set line_oa_url = line_oa_url if line_oa_url is defined else 'https://lin.ee/S1A0Px6' %}
+
   <form id="bookForm" method="POST" action="/book">
     <div class="layout">
 
@@ -69,7 +77,14 @@
             <label class="card" data-cat="{{ e.category }}" data-name="{{ e.name }}">
               <!-- name="equipment_id" ตรงกับที่ Backend ต้องการ -->
               <input type="checkbox" name="equipment_id" value="{{ e.id }}" {{ 'disabled' if e.available == 0 }}>
-              <div class="card-img">{{ {'camera': '📷', 'video': '🎥', 'tripod': '📐'}.get(e.category, '📦') }}</div>
+              {% set img = e.image if e.image is defined and e.image else images.get(e.id) %}
+              <div class="card-img">
+                {% if img %}
+                  <img src="{{ url_for('static', filename='images/' ~ img) }}" alt="{{ e.name }}" loading="lazy" onerror="this.remove()">
+                {% else %}
+                  {{ {'camera': '📷', 'video': '🎥', 'tripod': '📐'}.get(e.category, '📦') }}
+                {% endif %}
+              </div>
               <div class="card-body">
                 <h3 class="card-title">{{ e.name }}</h3>
                 <p class="card-desc">{{ e.desc }}</p>
@@ -120,7 +135,8 @@
       </div>
 
       <!-- ===== ฝั่งขวา: สรุปรายการ ===== -->
-      <aside class="panel summary">
+      <aside class="side">
+      <div class="panel summary">
         <h2 id="summaryTitle">รายการที่เลือก (0)</h2>
         <ul class="summary-list" id="summaryList"></ul>
         <p class="meta">ผู้ให้บริการ: การเรียนการสอน ชั้น 2<br>ผู้ดูแล: อุสมาน ตาเละ</p>
@@ -128,6 +144,16 @@
         <button type="button" class="btn btn-amber btn-block" id="nextBtn">เลือกวัน-เวลา →</button>
         <button type="submit" class="btn btn-block" id="submitBtn" hidden>ยืนยันการขอยืม</button>
         <button type="button" class="btn btn-outline btn-block" id="backBtn" hidden>← กลับไปเลือกอุปกรณ์</button>
+      </div>
+
+      <!-- เพิ่มเพื่อน LINE เพื่อรับแจ้งเตือนวันกำหนดคืน -->
+      <div class="panel line-card">
+        <h2>รับแจ้งเตือนทาง LINE</h2>
+        <p class="line-text">เพิ่มเพื่อน LINE ของระบบ เพื่อรับแจ้งเตือนวันกำหนดคืนอุปกรณ์</p>
+        <!-- วางรูป QR ไว้ที่ static/line_qr.png (ถ้าไม่มีรูป จะซ่อนไปเอง) -->
+        <img class="line-qr" src="{{ url_for('static', filename='line_qr.png') }}" alt="QR Code เพิ่มเพื่อน LINE" onerror="this.remove()">
+        <a class="btn btn-line btn-block" href="{{ line_oa_url }}" target="_blank" rel="noopener">เพิ่มเพื่อน LINE</a>
+      </div>
       </aside>
 
     </div>
@@ -200,6 +226,17 @@
   $('#start_date').addEventListener('change', (e) => {
     $('#end_date').min = e.target.value || today;
   });
+
+  // กดยืนยันแล้วให้เห็นว่ากำลังส่งคำขอ (และกันกดซ้ำ)
+  $('#bookForm').addEventListener('submit', () => {
+    const b = $('#submitBtn');
+    b.disabled = true;
+    b.textContent = 'กำลังส่งคำขอ...';
+  });
+
+  // เลื่อนไปที่ข้อความแจ้งผลจาก Backend
+  const flashArea = document.querySelector('.flash-area');
+  if (flashArea) flashArea.scrollIntoView({ behavior: 'smooth', block: 'center' });
 </script>
 </body>
 </html>

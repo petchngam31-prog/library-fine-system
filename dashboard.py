@@ -13,7 +13,8 @@ import json
 import os
 from datetime import date, datetime
 import sqlite3
-from flask import Flask, render_template_string, redirect, url_for, flash, request, abort
+from flask import Flask, render_template, render_template_string, redirect, url_for, flash, request, abort
+from flask import Flask, request, render_template
 
 from db_setup import init_mock_db, get_connection, DB_PATH
 from fine_calculator import check_and_update_fines, mark_as_notified, DEFAULT_FINE_RATE_PER_DAY, calculate_fine
@@ -191,15 +192,7 @@ def line_status():
 # 3. API สำหรับรับ LINE userId (เชื่อมโยงกับหน้า /line-mapping)
 @app.route('/line-mapping', methods=['GET'])
 def line_mapping():
-    # รับค่า userId ที่ส่งมาจาก LINE OA (เช่น /line-mapping?userId=Uxxxxxxxxxxxx)
-    line_user_id = request.args.get('userId')
-    
-    # ส่งค่า line_user_id กลับไปให้ Front-end
-    return jsonify({
-        "status": "success",
-        "line_user_id": line_user_id,
-        "message": "Ready for LINE account mapping"
-    }), 200
+    return render_template("line_mapping.html")
 
 
 @app.route('/book', methods=['GET', 'POST'])
@@ -292,6 +285,72 @@ def return_equipment(record_id):
 
     return f"✅ บันทึกการคืนอุปกรณ์ (รายการที่ {record_id}) สำเร็จ! (ยอดค่าปรับ: {fine_amount} บาท)"
 
+@app.route("/history", methods=["GET"])
+def history():
+    student_id = request.args.get("user_id", "").strip()
+    records = []
+
+    if student_id:
+        conn = get_connection()
+
+        # หา user_id ภายในระบบจากรหัสนักศึกษา
+        user = conn.execute("""
+            SELECT user_id
+            FROM users
+            WHERE student_id = ?
+        """, (student_id,)).fetchone()
+
+        if user:
+            internal_user_id = user["user_id"]
+
+            rows = conn.execute("""
+                SELECT
+                    e.equipment_name,
+                    br.borrow_date AS start_date,
+                    br.due_date AS end_date,
+                    br.return_date,
+                    br.fine_amount AS fine
+                FROM borrow_records br
+                JOIN equipment e
+                    ON e.equipment_id = br.equipment_id
+                WHERE br.user_id = ?
+                ORDER BY br.record_id DESC
+            """, (internal_user_id,)).fetchall()
+
+            from datetime import datetime
+
+            today = datetime.now().date()
+
+            for r in rows:
+                d = dict(r)
+
+                # ตรวจสอบสถานะ
+                if d["return_date"]:
+                    d["status"] = "returned"
+
+                else:
+                    try:
+                        due_date = datetime.strptime(
+                            d["end_date"], "%Y-%m-%d"
+                        ).date()
+
+                        if due_date < today:
+                            d["status"] = "overdue"
+                        else:
+                            d["status"] = "borrowing"
+
+                    except (ValueError, TypeError):
+                        d["status"] = "borrowing"
+
+                records.append(d)
+
+        conn.close()
+
+    return render_template(
+        "history.html",
+        user_id=student_id,
+        records=records
+    )
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -368,6 +427,7 @@ def webhook():
                                 f"สถานะระบบ: ปกติ ✅"
                             )
                             notifier.send(user_line_id, reply_message)
+
 
     except Exception as e:
         print(f"Webhook Error: {e}")

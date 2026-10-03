@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ประวัติการยืม | ยืมคืนกล้อง</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="/booking"><span class="brand-logo"></span>ยืมคืนกล้อง</a>
+  <nav class="nav">
+    <a href="/booking">จองอุปกรณ์</a>
+    <a class="active" href="/history">ประวัติการยืม</a>
+    <a href="/">แดชบอร์ดเจ้าหน้าที่</a>
+  </nav>
+</header>
+
+<main class="container">
+  <h1>ประวัติการยืมของฉัน</h1>
+
+  <!-- ค้นหาด้วยรหัสผู้ยืม → GET /history?user_id=xxx -->
+  <form class="search-bar" method="GET" action="/history">
+    <input type="text" name="user_id" value="{{ user_id or '' }}" placeholder="กรอกรหัสผู้ยืม เช่น 6612345678" required aria-label="รหัสผู้ยืม">
+    <button type="submit" class="btn btn-amber">ดูประวัติ</button>
+  </form>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="flash-area">
+      {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ '✅' if category == 'success' else '❌' }} {{ message }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  {% endwith %}
+
+  {% if user_id %}
+    {% set rows = records if records is defined else [] %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>อุปกรณ์</th>
+            <th>วันที่ยืม</th>
+            <th>กำหนดคืน</th>
+            <th>วันที่คืน</th>
+            <th class="num">ค่าปรับ</th>
+            <th>สถานะ</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          {% if r.status in ['returned', 'คืนแล้ว'] %}
+            {% set cls, label = 'returned', 'คืนแล้ว' %}
+          {% elif r.status in ['overdue', 'เลยกำหนด'] %}
+            {% set cls, label = 'overdue', 'เลยกำหนด' %}
+          {% else %}
+            {% set cls, label = 'borrowing', 'กำลังยืม' %}
+          {% endif %}
+          <tr>
+            <td>{{ r.equipment_name }}</td>
+            <td>{{ r.start_date }}</td>
+            <td>{{ r.end_date }}</td>
+            <td>{{ r.return_date or '-' }}</td>
+            <td class="num {{ 'fine-due' if r.fine and r.fine > 0 }}">{{ r.fine or 0 }}</td>
+            <td><span class="badge {{ cls }}">{{ label }}</span></td>
+          </tr>
+          {% else %}
+          <tr><td class="empty-row" colspan="6">ไม่พบประวัติการยืมของรหัส {{ user_id }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="hint">กรอกรหัสผู้ยืมด้านบน เพื่อดูประวัติการยืม-คืนและค่าปรับของคุณ</p>
+  {% endif %}
+</main>
+
+</body>
+</html>

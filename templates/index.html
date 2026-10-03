@@ -14,6 +14,7 @@
   <a class="brand" href="/"><span class="brand-logo"></span>ยืมคืนกล้อง</a>
   <nav class="nav">
     <a href="/booking">จองอุปกรณ์</a>
+    <a href="/history">ประวัติการยืม</a>
     <a class="active" href="/">แดชบอร์ดเจ้าหน้าที่</a>
   </nav>
 </header>
@@ -24,8 +25,8 @@
     <h1>รายการยืม-คืนอุปกรณ์</h1>
 
     <!-- ปุ่มตรวจสอบค่าปรับ → POST /check -->
-    <form method="POST" action="/check">
-      <button type="submit" class="btn btn-amber">ตรวจสอบค่าปรับและแจ้งเตือน LINE</button>
+    <form method="POST" action="/check" id="checkForm">
+      <button type="submit" class="btn btn-amber" id="checkBtn">ตรวจสอบค่าปรับและแจ้งเตือน LINE</button>
     </form>
   </div>
 
@@ -46,6 +47,12 @@
     {'id': 2, 'user_id': '002', 'equipment_name': 'ขาตั้ง', 'start_date': '2/10', 'end_date': '6/10', 'return_date': '6/10', 'fine': 0, 'status': 'returned'},
     {'id': 3, 'user_id': '003', 'equipment_name': 'กล้อง', 'start_date': '3/10', 'end_date': '8/10', 'return_date': None, 'fine': 0, 'status': 'borrowing'}
   ] %}
+
+  {% if records is not defined %}
+    <div class="flash-area">
+      <div class="flash warning">⚠️ กำลังแสดงข้อมูลตัวอย่าง: Backend ยังไม่ได้ส่งตัวแปร records เข้ามาที่หน้านี้ (ข้อมูลจริงจึงไม่อัปเดต)</div>
+    </div>
+  {% endif %}
 
   <div class="table-wrap">
     <table>
@@ -96,5 +103,24 @@
   </div>
 </main>
 
+<script>
+  // ปุ่มตรวจสอบค่าปรับ: แสดงสถานะกำลังทำงาน กันกดซ้ำ
+  document.getElementById('checkForm').addEventListener('submit', function () {
+    const b = document.getElementById('checkBtn');
+    b.disabled = true;
+    b.textContent = 'กำลังตรวจสอบ...';
+  });
+
+  // ปุ่มรับคืน: ถามยืนยันก่อน
+  document.querySelectorAll('a[href^="/return/"]').forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      if (!confirm('ยืนยันการรับคืนอุปกรณ์รายการนี้?')) e.preventDefault();
+    });
+  });
+
+  // เลื่อนไปที่ข้อความแจ้งผลจาก Backend
+  const flashArea = document.querySelector('.flash-area');
+  if (flashArea) flashArea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+</script>
 </body>
 </html>
