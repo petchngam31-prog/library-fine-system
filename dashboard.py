@@ -68,9 +68,9 @@ def admin():
     error=''
     if request.method=='POST':
         if admin_ok(request.form.get('password','')):session.clear();session['is_admin']=True;return redirect(url_for('admin'))
-        error='รหัสผ่านไม่ถูกต้อง'
+        error='รหัสผ่านไม่ถูกต้อง กรุณาลองอีกครั้ง'
     if session.get('is_admin'):return render_template('index.html')
-    return render_template_string('''<!doctype html><html lang="th"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>เข้าสู่ระบบเจ้าหน้าที่</title><body><main style="max-width:440px;margin:70px auto;font-family:sans-serif"><h2>เข้าสู่ระบบเจ้าหน้าที่</h2>{% if error %}<p style="color:#b91c1c">{{error}}</p>{% endif %}<form method="post"><label>รหัสผ่าน</label><input name="password" type="password" required autocomplete="current-password" style="display:block;width:100%;padding:10px;margin:8px 0 14px"><button type="submit">เข้าสู่ระบบ</button></form><p><a href="/">กลับหน้าจอง</a></p></main></html>''',error=error)
+    return render_template('admin_login.html',error=error)
 @app.route('/logout')
 def logout():session.clear();return redirect('/')
 @app.route('/api/equipment')
