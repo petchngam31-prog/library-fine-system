@@ -1,4 +1,10 @@
 __pycache__/
-*.pyc
-library_mock.db
+*.py[cod]
+*.db
+instance/
 .env
+.env.*
+!.env.example
+.venv/
+venv/
+.pytest_cache/
