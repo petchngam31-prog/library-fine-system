@@ -75,14 +75,12 @@ def run_overdue_check():
             if r["notified"] or not r["line_user_id"]: continue
             result=n.send(r["line_user_id"],n.build_overdue_message(r["full_name"],r["equipment_name"],str(r["due_date"]),days,amount))
             if result.success:
-                sent+=1
-                c.execute("UPDATE borrow_records SET notified=true WHERE id=%s",(r["record_id"],))
+                sent+=1; c.execute("UPDATE borrow_records SET notified=true WHERE id=%s",(r["record_id"],))
     return overdue,sent
 
 @app.after_request
 def headers(r):
-    r.headers["X-Content-Type-Options"]="nosniff"; r.headers["X-Frame-Options"]="SAMEORIGIN"; r.headers["Referrer-Policy"]="same-origin"; r.headers["Cache-Control"]="no-store"
-    return r
+    r.headers["X-Content-Type-Options"]="nosniff"; r.headers["X-Frame-Options"]="SAMEORIGIN"; r.headers["Referrer-Policy"]="same-origin"; r.headers["Cache-Control"]="no-store"; return r
 
 @app.route("/")
 @app.route("/booking")
@@ -117,13 +115,11 @@ def admin_users():
     if not session.get("is_admin"): return jsonify(message="Unauthorized"),401
     with conn() as c:
         if request.method=="GET":
-            rows=c.execute("SELECT id,student_id,name,(line_user_id IS NOT NULL) AS line_linked,created_at FROM users ORDER BY student_id").fetchall()
-            return jsonify(users=rows)
+            rows=c.execute("SELECT id,student_id,name,(line_user_id IS NOT NULL) AS line_linked,created_at FROM users ORDER BY student_id").fetchall(); return jsonify(users=rows)
         d=request.get_json(silent=True) or {}; sid=str(d.get("student_id","")).strip().upper(); name=str(d.get("name","")).strip()
         if not sid or not name or len(sid)>50 or len(name)>200: return jsonify(message="กรุณากรอกรหัสผู้ยืมและชื่อให้ถูกต้อง"),400
         if c.execute("SELECT 1 FROM users WHERE student_id=%s",(sid,)).fetchone(): return jsonify(message="รหัสผู้ยืมนี้มีอยู่แล้ว"),409
-        pin=f"{secrets.randbelow(1000000):06d}"
-        c.execute("INSERT INTO users(student_id,name,booking_pin_hash) VALUES(%s,%s,%s)",(sid,name,generate_password_hash(pin)))
+        pin=f"{secrets.randbelow(1000000):06d}"; c.execute("INSERT INTO users(student_id,name,booking_pin_hash) VALUES(%s,%s,%s)",(sid,name,generate_password_hash(pin)))
     return jsonify(message="เพิ่มผู้ยืมสำเร็จ",student_id=sid,booking_pin=pin),201
 
 @app.route("/api/book",methods=["POST"])
@@ -132,20 +128,23 @@ def api_book():
     raw=d.get("equipment_ids") or ([d.get("equipment_id")] if d.get("equipment_id") else [])
     if not sid or not pin or not start or not end or not raw: return jsonify(message="กรุณากรอกข้อมูลให้ครบถ้วน รวมถึง PIN ผู้ยืม"),400
     try:
-        sd=date.fromisoformat(start); ed=date.fromisoformat(end); eids=[int(x) for x in raw]
+        sd=date.fromisoformat(start); ed=date.fromisoformat(end); eids=list(dict.fromkeys(int(x) for x in raw))
         if ed<sd or sd<today_bkk() or any(x not in range(1,7) for x in eids): raise ValueError
     except Exception: return jsonify(message="รูปแบบข้อมูลหรือวันที่ไม่ถูกต้อง"),400
     with conn() as c:
-        u=c.execute("SELECT id,booking_pin_hash FROM users WHERE student_id=%s",(sid,)).fetchone()
+        u=c.execute("SELECT id,booking_pin_hash,line_user_id FROM users WHERE student_id=%s",(sid,)).fetchone()
         if not u or not u["booking_pin_hash"] or not check_password_hash(u["booking_pin_hash"],pin): return jsonify(message="รหัสผู้ยืมหรือ PIN ไม่ถูกต้อง กรุณาติดต่อเจ้าหน้าที่"),403
         uid=u["id"]
         for eid in eids:
             if c.execute("SELECT 1 FROM borrow_records WHERE equipment_id=%s AND return_date IS NULL AND borrow_date<=%s AND due_date>=%s",(eid,ed,sd)).fetchone(): return jsonify(message=f"อุปกรณ์หมายเลข {eid} ถูกจองในช่วงเวลาดังกล่าวแล้ว"),400
         for eid in eids: c.execute("INSERT INTO borrow_records(user_id,equipment_id,borrow_date,due_date,purpose) VALUES(%s,%s,%s,%s,%s)",(uid,eid,sd,ed,str(d.get("purpose",""))[:500]))
-        code=''.join(secrets.choice('ABCDEFGHJKLMNPQRSTUVWXYZ23456789') for _ in range(8)); code_hash=hashlib.sha256(code.encode()).hexdigest()
-        c.execute("UPDATE line_link_codes SET used_at=now() WHERE user_id=%s AND used_at IS NULL",(uid,)); c.execute("INSERT INTO line_link_codes(user_id,code_hash,expires_at) VALUES(%s,%s,now()+interval '15 minutes')",(uid,code_hash))
+        response={"message":"บันทึกการจองสำเร็จ","line_linked":bool(u["line_user_id"])}
+        if not u["line_user_id"]:
+            code=''.join(secrets.choice('ABCDEFGHJKLMNPQRSTUVWXYZ23456789') for _ in range(8)); code_hash=hashlib.sha256(code.encode()).hexdigest()
+            c.execute("UPDATE line_link_codes SET used_at=now() WHERE user_id=%s AND used_at IS NULL",(uid,)); c.execute("INSERT INTO line_link_codes(user_id,code_hash,expires_at) VALUES(%s,%s,now()+interval '15 minutes')",(uid,code_hash))
+            response.update(line_link_code=code,line_instruction=f"ผูก {code}")
     session["student_id"]=sid
-    return jsonify(message="บันทึกการจองสำเร็จ",line_link_code=code,line_instruction=f"ส่งข้อความใน LINE: ผูก {code}")
+    return jsonify(**response)
 
 @app.route("/api/records")
 def records():
@@ -216,7 +215,8 @@ def webhook():
                 if not link: reply="รหัสไม่ถูกต้อง หมดอายุ หรือถูกใช้แล้ว กรุณาจองใหม่เพื่อรับรหัสใหม่"
                 elif existing and existing["student_id"]!=link["student_id"]: reply="LINE นี้เชื่อมกับผู้ใช้อื่นอยู่แล้ว กรุณาติดต่อเจ้าหน้าที่"
                 elif link["line_user_id"] and link["line_user_id"]!=luid: reply="บัญชีผู้ใช้นี้เชื่อม LINE อื่นอยู่แล้ว กรุณาติดต่อเจ้าหน้าที่"
-                else: c.execute("UPDATE users SET line_user_id=%s WHERE id=%s",(luid,link["user_id"])); c.execute("UPDATE line_link_codes SET used_at=now() WHERE id=%s",(link["id"],)); reply="เชื่อมบัญชีสำเร็จ ระบบจะส่งการแจ้งเตือนมาที่ LINE นี้"
+                else:
+                    c.execute("UPDATE users SET line_user_id=%s WHERE id=%s",(luid,link["user_id"])); c.execute("UPDATE line_link_codes SET used_at=now() WHERE id=%s",(link["id"],)); reply="เชื่อมบัญชีสำเร็จ ระบบจะส่งการแจ้งเตือนมาที่ LINE นี้"
         elif text.lower() in {"สถานะ","status"}:
             with conn() as c: u=c.execute("SELECT student_id FROM users WHERE line_user_id=%s",(luid,)).fetchone()
             reply=("เชื่อมบัญชีแล้ว: "+u["student_id"]) if u else "ยังไม่ได้เชื่อมบัญชี กรุณาจองผ่านเว็บไซต์เพื่อรับรหัสเชื่อมบัญชี"
@@ -229,6 +229,6 @@ def health():
     try:
         with conn() as c: db=c.execute("SELECT 1 AS ok").fetchone()["ok"]==1
     except Exception: pass
-    return jsonify(status="ok" if db else "degraded",database=db,line_enabled=LINE_ENABLED,admin_configured=bool(ADMIN_PASSWORD_HASH or ADMIN_PASSWORD),cron_configured=bool(CRON_SECRET)),(200 if db else 503)
+    return jsonify(status="ok" if db else "degraded",database=db,line_enabled=LINE_ENABLED,admin_configured=bool(ADMIN_PASSWORD_HASH or ADMIN_PASSWORD)),(200 if db else 503)
 
-if __name__=="__main__": app.run(host="0.0.0.0",port=int(os.environ.get("PORT","5000")))
+if __name__=="__main__": app.run(host="0.0.0.0",port=int(os.environ.get("PORT",5000)))
