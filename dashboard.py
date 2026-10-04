@@ -14,6 +14,7 @@ DATABASE_URL=os.environ.get('DATABASE_URL',''); FINE_RATE=50; BANGKOK=ZoneInfo('
 LINE_TOKEN=os.environ.get('LINE_CHANNEL_ACCESS_TOKEN',''); LINE_SECRET=os.environ.get('LINE_CHANNEL_SECRET',''); LINE_ENABLED=bool(LINE_TOKEN and LINE_SECRET)
 ADMIN_PASSWORD_HASH=os.environ.get('ADMIN_PASSWORD_HASH',''); ADMIN_PASSWORD=os.environ.get('ADMIN_PASSWORD',''); CRON_SECRET=os.environ.get('CRON_SECRET','')
 app=Flask(__name__); app.secret_key=os.environ.get('FLASK_SECRET_KEY') or os.urandom(32); app.config.update(SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Lax',SESSION_COOKIE_SECURE=True)
+ADMIN_LOGIN_HTML='''<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>เข้าสู่ระบบเจ้าหน้าที่ | ยืมคืนกล้อง</title><link rel="stylesheet" href="/static/style.css"><style>.login-page{min-height:100vh;display:grid;place-items:center;padding:28px 16px;background:linear-gradient(145deg,#f5f6fa 0%,#e9edf7 100%)}.login-card{width:min(100%,440px);background:#fff;border:1px solid #dfe3ee;border-radius:22px;padding:34px;box-shadow:0 18px 55px rgba(27,42,94,.12)}.login-icon{width:58px;height:58px;border-radius:16px;display:grid;place-items:center;margin:0 auto 18px;background:#1b2a5e;color:#fff;font-size:28px}.login-head{text-align:center;margin-bottom:26px}.login-head h1{font-size:25px;margin:0 0 7px}.login-head p{margin:0;color:#5d6585;font-size:14px}.login-card .field{margin-bottom:18px}.login-card .btn{width:100%;font-size:16px}.login-back{display:block;text-align:center;margin-top:20px;color:#5d6585;font-size:14px}.login-error{background:#fde2e0;color:#b3261e;border:1px solid #f3b4af;border-radius:10px;padding:11px 14px;margin-bottom:18px;font-size:14px}.lock-note{text-align:center;color:#8a91aa;font-size:12px;margin:16px 0 0}</style></head><body><main class="login-page"><section class="login-card"><div class="login-icon">🔐</div><div class="login-head"><h1>เข้าสู่ระบบเจ้าหน้าที่</h1><p>ระบบจัดการยืม–คืนอุปกรณ์และค่าปรับ</p></div>{% if error %}<div class="login-error">{{ error }}</div>{% endif %}<form method="post"><div class="field"><label class="lbl" for="password">รหัสผ่านผู้ดูแลระบบ</label><input id="password" name="password" type="password" required autocomplete="current-password" autofocus placeholder="กรอกรหัสผ่าน"></div><button class="btn" type="submit">เข้าสู่แดชบอร์ด</button></form><p class="lock-note">สำหรับเจ้าหน้าที่ที่ได้รับอนุญาตเท่านั้น</p><a class="login-back" href="/">← กลับหน้าจองอุปกรณ์</a></section></main></body></html>'''
 def conn():
     if not DATABASE_URL: raise RuntimeError('DATABASE_URL is required')
     return psycopg.connect(DATABASE_URL,row_factory=dict_row,connect_timeout=10)
@@ -70,7 +71,7 @@ def admin():
         if admin_ok(request.form.get('password','')):session.clear();session['is_admin']=True;return redirect(url_for('admin'))
         error='รหัสผ่านไม่ถูกต้อง กรุณาลองอีกครั้ง'
     if session.get('is_admin'):return render_template('index.html')
-    return render_template('admin_login.html',error=error)
+    return render_template_string(ADMIN_LOGIN_HTML,error=error)
 @app.route('/logout')
 def logout():session.clear();return redirect('/')
 @app.route('/api/equipment')
