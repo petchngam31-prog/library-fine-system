@@ -1,1 +1,102 @@
-<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ประวัติการยืม | Demo</title><link rel="stylesheet" href="/static/style.css"></head><body><header class="topbar"><a class="brand" href="/">ยืมคืนกล้อง</a><nav class="nav"><a href="/">จองอุปกรณ์</a><a class="active" href="/history.html">ประวัติการยืม</a><a href="/admin">แดชบอร์ดเจ้าหน้าที่</a></nav></header><main class="container"><p class="notice">Demo สาธารณะ: ใช้ข้อมูลสมมติร่วมกันเท่านั้น</p><h1>ประวัติการยืม</h1><form class="search-bar" id="searchForm"><input type="text" id="userId" placeholder="รหัสทดลอง เช่น 00012345" required><button type="submit" class="btn btn-amber">ดูประวัติ</button></form><div class="table-wrap" id="tableWrap" hidden><table><thead><tr><th>อุปกรณ์</th><th>วันที่ยืม</th><th>กำหนดคืน</th><th>วันที่คืน</th><th>ค่าปรับ</th></tr></thead><tbody id="tbody"></tbody></table></div></main><script src="/static/app.js"></script><script>document.querySelector('#searchForm').addEventListener('submit',async e=>{e.preventDefault();const q=document.querySelector('#userId').value.trim();const r=await fetch('/api/history?student_id='+encodeURIComponent(q));const d=await r.json();const rows=d.records||[];document.querySelector('#tableWrap').hidden=false;document.querySelector('#tbody').innerHTML=rows.length?rows.map(x=>`<tr><td>${esc(x.equipment_name)}</td><td>${fmtDate(x.borrow_date)}</td><td>${fmtDate(x.due_date)}</td><td>${fmtDate(x.return_date)}</td><td>${money(x.fine_amount||0)}</td></tr>`).join(''):'<tr><td colspan="5">ไม่พบประวัติ Demo</td></tr>';});</script></body></html>
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ประวัติการยืม | ยืมคืนกล้อง</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="/"><span class="brand-logo"></span>ยืมคืนกล้อง</a>
+  <nav class="nav">
+    <a href="/">จองอุปกรณ์</a>
+    <a class="active" href="/history.html">ประวัติการยืม</a>
+    <a href="/admin">แดชบอร์ดเจ้าหน้าที่</a>
+  </nav>
+</header>
+
+<main class="container">
+  <h1>ประวัติการยืมของฉัน</h1>
+
+  <form class="search-bar" id="searchForm">
+    <input type="text" id="userId" placeholder="กรอกรหัสผู้ยืม หรือ รหัสนักศึกษา" required aria-label="รหัสผู้ยืม">
+    <button type="submit" class="btn btn-amber">ดูประวัติ</button>
+  </form>
+
+  <div class="flash-area" id="flash-area"></div>
+  <p class="hint" id="hint">กรอกรหัสผู้ยืมด้านบน เพื่อดูประวัติการยืม-คืนและค่าปรับของคุณ</p>
+
+  <div class="table-wrap" id="tableWrap" hidden>
+    <table>
+      <thead>
+        <tr><th>ลำดับ</th><th>อุปกรณ์</th><th>วันที่ยืม</th><th>กำหนดคืน</th><th>วันที่คืน</th><th class="num">ค่าปรับ</th><th>สถานะ</th></tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+</main>
+
+<script src="/static/config.js"></script>
+<script src="/static/app.js"></script>
+<script>
+  document.querySelector("#searchForm")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const q = document.querySelector("#userId").value.trim();
+    const flashArea = document.querySelector("#flash-area");
+    if (flashArea) flashArea.innerHTML = "";
+
+    try {
+      const res = await api("/api/records");
+      if (!res || !res.ok) {
+        if (typeof showMessage === "function") showMessage("error", (res && res.data && res.data.message) || "โหลดประวัติไม่สำเร็จ");
+        return;
+      }
+
+      // กรองเฉพาะประวัติที่เป็นของรหัสผู้ยืม หรือ รหัสนักศึกษานี้
+      const mine = (res.data.records || [])
+        .filter((r) => 
+          String(r.student_id || "").trim() === q || 
+          String(r.user_id || "").trim() === q
+        )
+        .sort((a, b) => b.record_id - a.record_id);
+
+      const hintEl = document.querySelector("#hint");
+      const tableWrapEl = document.querySelector("#tableWrap");
+      const tbodyEl = document.querySelector("#tbody");
+
+      if (hintEl) hintEl.hidden = true;
+      if (tableWrapEl) tableWrapEl.hidden = false;
+
+      if (tbodyEl) {
+        tbodyEl.innerHTML = mine.length
+          ? mine.map((r, index) => {
+              const st = typeof statusOf === "function" ? statusOf(r) : { cls: "borrowing", label: "กำลังยืม" };
+              const fine = Number(r.fine_amount || 0);
+              const fDate = typeof fmtDate === "function" ? fmtDate : (d) => d || "-";
+              const fMoney = typeof money === "function" ? money : (m) => m;
+              const eqName = typeof esc === "function" ? esc(r.equipment_name) : r.equipment_name;
+
+              return `<tr>
+                <td>${index + 1}</td>
+                <td>${eqName}</td>
+                <td>${fDate(r.borrow_date)}</td>
+                <td>${fDate(r.due_date)}</td>
+                <td>${fDate(r.return_date)}</td>
+                <td class="num ${fine > 0 ? "fine-due" : ""}">${fMoney(fine)}</td>
+                <td><span class="badge ${st.cls}">${st.label}</span></td>
+              </tr>`;
+            }).join("")
+          : `<tr><td class="empty-row" colspan="7">ไม่พบประวัติการยืมของรหัส ${typeof esc === "function" ? esc(q) : q}</td></tr>`;
+      }
+    } catch (err) {
+      console.error(err);
+      alert("เกิดข้อผิดพลาดในการโหลดประวัติ");
+    }
+  });
+</script>
+</body>
+</html>
